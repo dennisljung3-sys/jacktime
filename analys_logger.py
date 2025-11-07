@@ -115,12 +115,7 @@ def hantera_loggning(cap, metadata, startlista):
             aktiv_hund = int(chr(tangent))
             print(f"🎯 Loggar hund {aktiv_hund}. Klicka nos före och efter målgång.")
         elif tangent == ord('z'):
-            hund_id = input("🗑️ Ange hundnummer att radera tider för: ").strip()
-            if hund_id in loggade_tider:
-                loggade_tider[hund_id] = "DNF"
-                print(f"↩️ Tiden för hund {hund_id} återställd till DNF.")
-            else:
-                print("ℹ️ Ingen tid loggad för den hunden.")
+            print("ℹ️ Använd [r] i analysmenyn för att återställa tider till DNF.")
 
     cv2.destroyWindow("Analys")
     return loggade_tider

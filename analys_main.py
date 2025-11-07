@@ -17,7 +17,7 @@ def hantera_analysval(index, matchande_videor):
     for i, filnamn in enumerate(matchande_videor, start=1):
         print(f"  {i}. {filnamn}")
 
-    print("\n🧭 Tangenter: [v] välj video, [s] sammanfatta, [q] avsluta")
+    print("\n🧭 Tangenter: [v] välj video, [s] sammanfatta, [r] radera tider, [q] avsluta")
     val = input("👉 Välj: ").strip().lower()
 
     if val == "v":
@@ -33,11 +33,14 @@ def hantera_analysval(index, matchande_videor):
             return "upprepa"
     elif val == "s":
         return "sammanfatta"
+    elif val == "r":
+        return "radera"
     elif val == "q":
         return "avsluta"
     else:
         print("❌ Ogiltigt val – försök igen.")
         return "upprepa"
+
 
 def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, startlista_namn=None, startlista=None, lopp_index=None):
     videomapp = os.path.dirname(videofil)
@@ -63,6 +66,14 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
             break
         elif val == "sammanfatta":
             visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+            continue
+        elif val == "radera":
+            hund_id = input("🗑️ Ange hundnummer att återställa till DNF: ").strip()
+            if hund_id in loggade_tider_total:
+                loggade_tider_total[hund_id] = "DNF"
+                print(f"↩️ Alla tider för hund {hund_id} återställda till DNF.")
+            else:
+                print("ℹ️ Ingen tid loggad för den hunden.")
             continue
         elif isinstance(val, int):
             index = val
@@ -117,3 +128,4 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
                 print("✅ Alla lopp är analyserade – tävlingspasset är klart.")
         else:
             print("⚠️ Kunde inte hoppa till nästa lopp – startlista saknas eller är inte en lista.")
+
