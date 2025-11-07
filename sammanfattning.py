@@ -30,12 +30,33 @@ def exportera_startlista(startlista, filväg):
     writer.close()
     print(f"\n📝 Export klar: {export_fil}")
 
+def extrahera_sortbar_tid(tider):
+    if isinstance(tider, str) and tider == "DNF":
+        return float('inf')  # Sorteras sist
+    if isinstance(tider, list):
+        giltiga = [
+            t["tid"] if isinstance(t, dict) and "tid" in t else t
+            for t in tider
+            if isinstance(t, (float, int)) or (isinstance(t, dict) and "tid" in t)
+        ]
+        return max(giltiga) if giltiga else float('inf')
+    elif isinstance(tider, dict) and "tid" in tider:
+        return tider["tid"]
+    elif isinstance(tider, (float, int)):
+        return tider
+    return float('inf')
+
+def formatera_tid(tid):
+    if isinstance(tid, (float, int)):
+        return f"{tid:.3f}"
+    return "DNF"
+
 def visa_sammanfattning(loppnamn, tider, startlista):
     print(f"\n📋 Sammanfattning för {loppnamn}:")
     if not tider:
         print("⚠️ Inga tider loggade.")
         return
-    sorterade = sorted(tider.items(), key=lambda x: x[1])
+    sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
     for placering, (hundnummer, tid) in enumerate(sorterade, start=1):
         info = startlista.get(str(hundnummer), {})
         namn = info.get("namn", f"Hund {hundnummer}")
@@ -47,7 +68,7 @@ def visa_sammanfattning(loppnamn, tider, startlista):
         else:
             splittid = måltid = tid
 
-        print(f"  {placering}. Hund {hundnummer} ({namn}): Splittid {splittid:.3f} s, Måltid {måltid:.3f} s")
+        print(f"  {placering}. Hund {hundnummer} ({namn}): Splittid {formatera_tid(splittid)} s, Måltid {formatera_tid(måltid)} s")
 
 def spara_analysresultat(startlista_namn, loppnamn, tider, metadata, startlista):
     mapp = relativ_sökväg("resultat", startlista_namn)
@@ -107,7 +128,7 @@ def exportera_till_excel(startlista_namn, loppnamn, tider, startlista):
         tid = item[1]
         return min(tid) if isinstance(tid, list) else tid
 
-    sorterade = sorted(tider.items(), key=sort_nyckel)
+    sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
     data = []
 
     for placering, (hundnummer, tid) in enumerate(sorterade, start=1):
@@ -125,8 +146,8 @@ def exportera_till_excel(startlista_namn, loppnamn, tider, startlista):
             "Plats": placering,
             "Startnummer": hundnummer,
             "Namn": namn,
-            "Splittid (s)": f"{splittid:.3f}",
-            "Måltid (s)": f"{måltid:.3f}"
+            "Splittid (s)": formatera_tid(splittid),
+            "Måltid (s)": formatera_tid(måltid)
         })
 
     df = pd.DataFrame(data)
@@ -228,7 +249,7 @@ def exportera_hel_tävling(startlista_namn):
             tid = item[1]
             return min(tid) if isinstance(tid, list) else tid
 
-        sorterade = sorted(tider.items(), key=sort_nyckel)
+        sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
 
         alla_rader.append([f"Lopp: {loppnamn}"])
         alla_rader.append(["Plats", "Startnummer", "Namn", "Splittid (s)", "Måltid (s)"])
@@ -246,8 +267,9 @@ def exportera_hel_tävling(startlista_namn):
                 placering,
                 hundnummer,
                 namn,
-                f"{splittid:.3f}",
-                f"{måltid:.3f}"
+                formatera_tid(splittid),
+                formatera_tid(måltid)
+
             ])
 
         alla_rader.append([])
