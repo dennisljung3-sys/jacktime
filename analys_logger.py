@@ -117,8 +117,8 @@ def hantera_loggning(cap, metadata, startlista):
         elif tangent == ord('z'):
             hund_id = input("🗑️ Ange hundnummer att radera tider för: ").strip()
             if hund_id in loggade_tider:
-                del loggade_tider[hund_id]
-                print(f"↩️ Alla tider för hund {hund_id} borttagna.")
+                loggade_tider[hund_id] = "DNF"
+                print(f"↩️ Tiden för hund {hund_id} återställd till DNF.")
             else:
                 print("ℹ️ Ingen tid loggad för den hunden.")
 
