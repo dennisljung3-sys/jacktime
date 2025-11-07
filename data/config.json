@@ -1,8 +1,8 @@
 {
   "arduino_port": "/dev/ttyUSB0",
-  "kamera_index": 2,
-  "kamera_fps": 120,
-  "verifierad_fps": 120.0,
+  "kamera_index": 0,
+  "kamera_fps": 30,
+  "verifierad_fps": 30.0,
   "m\u00e5llinje_x": 480,
   "sk\u00e4rmstorlek": [
     1600,

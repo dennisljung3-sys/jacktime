@@ -53,7 +53,7 @@ def hantera_loggning(cap, metadata, startlista):
     cv2.resizeWindow("Analys", fönster_bredd, fönster_höjd)
     cv2.moveWindow("Analys", skärmstorlek[0] // 2, 0)
 
-    loggade_tider = {}
+    loggade_tider = {str(nr): "DNF" for nr in startlista.keys()}
     frame_index = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     aktiv_hund = None
@@ -82,7 +82,7 @@ def hantera_loggning(cap, metadata, startlista):
                     hund_id = str(aktiv_hund)
                     if hund_id not in loggade_tider:
                         loggade_tider[hund_id] = []
-                    loggade_tider[hund_id].append(tid)
+                    loggade_tider[hund_id] = [tid]
                     print(f"✅ Tid loggad för hund {hund_id}: {tid:.3f} s")
                     visa_loggningsstatus(loggade_tider, startlista)
                 aktiv_hund = None

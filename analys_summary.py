@@ -16,6 +16,8 @@ def visa_sammanfattning(loppnamn, loggade_tider, startlista):
         return
 
     def extrahera_tider(tider):
+        if isinstance(tider, str) and tider == "DNF":
+            return []
         if isinstance(tider, list):
             return [
                 t["tid"] if isinstance(t, dict) and "tid" in t else t
@@ -41,5 +43,5 @@ def visa_sammanfattning(loppnamn, loggade_tider, startlista):
         if tider_lista:
             tider_str = ", ".join(f"{t:.3f}s" for t in sorted(tider_lista))
         else:
-            tider_str = "❌"
+            tider_str = "DNF"
         print(f"  {placering}. Hund {hundnummer} ({namn}) {klubb}: {tider_str}")

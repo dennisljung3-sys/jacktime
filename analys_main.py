@@ -12,6 +12,33 @@ from sammanfattning import (
 )
 from confighantering import ladda_config
 
+def hantera_analysval(index, matchande_videor):
+    print("\n🎞️ Tillgängliga videor:")
+    for i, filnamn in enumerate(matchande_videor, start=1):
+        print(f"  {i}. {filnamn}")
+
+    print("\n🧭 Tangenter: [v] välj video, [s] sammanfatta, [q] avsluta")
+    val = input("👉 Välj: ").strip().lower()
+
+    if val == "v":
+        try:
+            val_num = int(input(f"👉 Ange videonummer (1–{len(matchande_videor)}): ").strip())
+            if 1 <= val_num <= len(matchande_videor):
+                return val_num - 1
+            else:
+                print("❌ Ogiltigt nummer.")
+                return "upprepa"
+        except ValueError:
+            print("❌ Ange ett heltal.")
+            return "upprepa"
+    elif val == "s":
+        return "sammanfatta"
+    elif val == "q":
+        return "avsluta"
+    else:
+        print("❌ Ogiltigt val – försök igen.")
+        return "upprepa"
+
 def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, startlista_namn=None, startlista=None, lopp_index=None):
     videomapp = os.path.dirname(videofil)
     alla_filer = sorted(f for f in os.listdir(videomapp) if f.endswith(".avi"))
@@ -23,7 +50,7 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
     if not matchande:
         print("❌ Inga matchande videor hittades.")
         return
-    
+
     print(f"\n📁 Laddar analys för lopp: {valt_loppnamn}")
     print(f"🎞️ Antal videor att analysera: {len(matchande)}")
 
@@ -31,6 +58,17 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
     loggade_tider_total = {}
 
     while True:
+        val = hantera_analysval(index, matchande)
+        if val == "avsluta":
+            break
+        elif val == "sammanfatta":
+            visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+            continue
+        elif isinstance(val, int):
+            index = val
+        else:
+            continue  # Ogiltigt val, upprepa
+
         aktuell_fil = os.path.join(videomapp, matchande[index])
         print(f"\n🎞️ Öppnar video {index+1}/{len(matchande)}: {matchande[index]}")
         cap, metadata, startlista_dict, loppnamn, startlista_namn = ladda_video_och_metadata(aktuell_fil, valt_loppnamn)
@@ -46,28 +84,16 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
                 loggade_tider_total[hund] = []
             loggade_tider_total[hund].extend(tider if isinstance(tider, list) else [tider])
 
-        # Fråga om nästa video
-        print("\n⏭️ Tangenter: [n] nästa video, [m] föregående, [s] sammanfatta, [q] avsluta")
-        val = input("👉 Välj: ").strip().lower()
-        if val == "n":
-            index = (index + 1) % len(matchande)
-        elif val == "m":
-            index = (index - 1) % len(matchande)
-        elif val == "s":
-            visa_sammanfattning(loppnamn, loggade_tider_total, startlista_dict)
-        elif val == "q":
-            break
-
     # Avslutande sammanfattning
     print("\n📋 Slutlig sammanfattning:")
-    visa_sammanfattning(loppnamn, loggade_tider_total, startlista_dict)
+    visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
 
     # Automatisk sparning om tider finns
     if loggade_tider_total:
         from metadata import spara_metadata_och_frame_tider as spara_resultat
         spara_analysresultat(aktuell_fil, loggade_tider_total)
 
-        loppnamn_sanerat = sanera_filnamn(loppnamn)
+        loppnamn_sanerat = sanera_filnamn(valt_loppnamn)
         spara_sammanfattning_json(startlista_namn, loppnamn_sanerat, loggade_tider_total, metadata, startlista_dict)
         fråga_om_export(startlista_namn, loppnamn_sanerat, loggade_tider_total, startlista_dict)
 
@@ -76,7 +102,7 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
         print("⚠️ Inga tider loggade – resultat sparas inte.")
 
     print("🏁 Analys klar.")
-    
+
     # Hoppa till nästa lopp om tillåtet
     if tillåt_nästa_lopp and startlista_namn and startlista and lopp_index is not None:
         from tavling import starta_tavlingsläge

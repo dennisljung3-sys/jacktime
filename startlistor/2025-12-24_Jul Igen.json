@@ -1,0 +1,10 @@
+[
+  {
+    "lopp_namn": "Tomte Loppet",
+    "distans": 500,
+    "hundar": {
+      "1": "Jack",
+      "2": "Lando"
+    }
+  }
+]
