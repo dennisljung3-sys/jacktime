@@ -1,0 +1,12 @@
+{
+  "arduino_port": "/dev/ttyUSB0",
+  "kamera_index": 2,
+  "kamera_fps": 120,
+  "verifierad_fps": 120.0,
+  "m\u00e5llinje_x": 480,
+  "sk\u00e4rmstorlek": [
+    1600,
+    900
+  ],
+  "senaste_lopp_id": 2
+}
