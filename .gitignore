@@ -1,9 +1,30 @@
-# Ignorera alla mappar
-*/
+# Ignorera virtuella miljöer
+venv/
 
-# Men tillåt .py-filer i root
-!/*.py
+# Ignorera Python cache och kompilerade filer
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Tillåt andra filer i root om du vill
+# Ignorera loggar och temporära filer
+*.log
+*.tmp
+*.swp
+
+# Ignorera resultatfiler och analyser som genereras
+resultat/
+träning/
+*.avi
+*.json
+
+# Ignorera IDE-specifika filer
+.idea/
+.vscode/
+
+# Ignorera synk/exclude filer
+.sync-exclude.lst
+
+# Tillåt viktiga filer i root
 !README.md
 !.gitignore
