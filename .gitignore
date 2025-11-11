@@ -1,0 +1,9 @@
+# Ignorera alla mappar
+*/
+
+# Men tillåt .py-filer i root
+!/*.py
+
+# Tillåt andra filer i root om du vill
+!README.md
+!.gitignore
