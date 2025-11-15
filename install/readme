@@ -1,0 +1,30 @@
+i terminalen, navigera till /jacktime/install kör: 
+python3 setup_env.py
+
+efter den är klar va kvar i /jacktime/install och kör:
+source ../venv/bin/activate
+
+om du behöver inaktivera den virituela miljön kör:
+deactivate
+
+
+copilots readme
+
+# 📦 Skapa virtuell miljö i projektets root
+python3 -m venv venv
+
+# 🚀 Aktivera miljön (Linux/macOS)
+source venv/bin/activate
+
+# 🚀 Aktivera miljön (Windows PowerShell)
+venv\Scripts\Activate.ps1
+
+# 🚀 Aktivera miljön (Windows CMD)
+venv\Scripts\activate.bat
+
+# 📥 Installera alla bibliotek från requirements.txt
+pip install -r install/requirements.txt
+
+# ❌ Avaktivera miljön
+deactivate
+

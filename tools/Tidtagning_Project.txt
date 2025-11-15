@@ -1,0 +1,2443 @@
+
+
+# --- analys_loader.py ---
+
+   1: from paths import relativ_sökväg
+   2: import cv2
+   3: import json
+   4: import os
+   5: from textutils import normalisera, sanera_filnamn
+   6: 
+   7: def ladda_video_och_metadata(videofil, valt_loppnamn=None):
+   8:     if not os.path.exists(videofil):
+   9:         print(f"❌ Videofil hittades inte: {videofil}")
+  10:         return None, None, None, None, None
+  11: 
+  12:     metadata_fil = os.path.splitext(videofil)[0] + ".json"
+  13:     if not os.path.exists(metadata_fil):
+  14:         print(f"❌ Metadatafil saknas: {metadata_fil}")
+  15:         return None, None, None, None, None
+  16: 
+  17:     with open(metadata_fil, "r") as f:
+  18:         filinnehåll = json.load(f)
+  19: 
+  20:     if "metadata" in filinnehåll:
+  21:         metadata = filinnehåll["metadata"]
+  22:     else:
+  23:         metadata = {k: v for k, v in filinnehåll.items() if k not in ["tider", "startlista"]}
+  24: 
+  25:     startlista = filinnehåll.get("startlista", {})
+  26: 
+  27:     mållinje_x = metadata.get("mållinje_x")
+  28:     if mållinje_x is None:
+  29:         print("⚠️ Mållinje saknas i metadata – analysen kan bli felaktig.")
+  30: 
+  31:     delar = videofil.split(os.sep)
+  32:     if len(delar) < 3:
+  33:         print("❌ Ogiltig sökväg till videofil.")
+  34:         return None, None, None, None, None
+  35:     startlista_namn = delar[-2]
+  36: 
+  37:     if valt_loppnamn is None:
+  38:         print("ℹ️ Träningsläge: ingen startlista används.")
+  39:         loppnamn = os.path.splitext(os.path.basename(videofil))[0]
+  40:         if not startlista:
+  41:             startlista = {
+  42:                 str(i): {"namn": f"Hund {i}", "klubb": ""}
+  43:                 for i in range(1, 7)
+  44:             }
+  45:         cap = cv2.VideoCapture(videofil)
+  46:         if not cap.isOpened():
+  47:             print("❌ Kunde inte öppna videon.")
+  48:             return None, None, None, None, None
+  49:         return cap, metadata, startlista, loppnamn, "träning"
+  50: 
+  51:     startlista_fil = relativ_sökväg("startlistor", f"{sanera_filnamn(startlista_namn)}.json")
+  52:     if not os.path.exists(startlista_fil):
+  53:         print(f"❌ Startlista saknas: {startlista_fil}")
+  54:         return None, None, None, None, None
+  55: 
+  56:     with open(startlista_fil, "r", encoding="utf-8") as f:
+  57:         alla_lopp = json.load(f)
+  58: 
+  59:     valt_loppnamn = valt_loppnamn.replace("_", " ") if valt_loppnamn else None
+  60: 
+  61:     matchande_lopp = next(
+  62:         (lopp for lopp in alla_lopp if normalisera(lopp.get("lopp_namn", "")) == normalisera(valt_loppnamn)),
+  63:         None
+  64:     )
+  65:     if not matchande_lopp:
+  66:         print(f"❌ Hittade inget lopp med namn '{valt_loppnamn}' i startlistan.")
+  67:         return None, None, None, None, None
+  68: 
+  69:     loppnamn = matchande_lopp.get("lopp_namn", "Okänt lopp")
+  70:     hundar = matchande_lopp.get("hundar", {})
+  71:     startlista = {
+  72:         str(nr): {"namn": namn, "klubb": ""}
+  73:         for nr, namn in hundar.items()
+  74:     }
+  75: 
+  76:     cap = cv2.VideoCapture(videofil)
+  77:     if not cap.isOpened():
+  78:         print("❌ Kunde inte öppna videon.")
+  79:         return None, None, None, None, None
+  80: 
+  81:     return cap, metadata, startlista, loppnamn, startlista_namn
+
+
+# --- analys_logger.py ---
+
+   1: import cv2
+   2: import os
+   3: import json
+   4: from datetime import datetime
+   5: from analys_overlay import rita_overlay
+   6: from paths import relativ_sökväg
+   7: from textutils import sanera_filnamn
+   8: 
+   9: def logga_tid(hundnummer, tid_före, tid_efter, före_pos, efter_pos, mållinje_x):
+  10:     if före_pos == efter_pos:
+  11:         print(f"⚠️ Hund {hundnummer}: nospositioner identiska – kan inte interpolera.")
+  12:         return None
+  13:     total_dx = efter_pos - före_pos
+  14:     mål_dx = mållinje_x - före_pos
+  15:     andel = mål_dx / total_dx
+  16:     tid_diff = tid_efter - tid_före
+  17:     passeringstid = tid_före + andel * tid_diff
+  18:     print(f"✅ Hund {hundnummer}: passerade vid {passeringstid:.3f} s")
+  19:     return round(passeringstid, 3)
+  20: 
+  21: def visa_loggningsstatus(loggade_tider, startlista):
+  22:     print("\n📋 Loggningsstatus:")
+  23:     for hundnummer in sorted(startlista.keys(), key=int):
+  24:         info = startlista[hundnummer]
+  25:         namn = info.get("namn", "Okänd")
+  26:         tider = loggade_tider.get(hundnummer, [])
+  27:         status = f"{len(tider)} tider" if tider else "❌"
+  28:         print(f"  Hund {hundnummer}: {namn} {status}")
+  29: 
+  30: def hantera_loggning(cap, metadata, startlista):
+  31:     fps = metadata.get("fps")
+  32:     if fps is None:
+  33:         try:
+  34:             with open(relativ_sökväg("data", "config.json")) as f:
+  35:                 config = json.load(f)
+  36:             fps = config.get("verifierad_fps") or config.get("kamera_fps") or 30
+  37:             print(f"⚠️ Ingen FPS i metadata – använder fallback: {fps} FPS")
+  38:         except:
+  39:             fps = 30
+  40:             print("⚠️ Kunde inte läsa config – använder 30 FPS som fallback.")
+  41: 
+  42:     fördröjning = metadata.get("fördröjning", 0)
+  43:     frame_tider = metadata.get("frame_tider")
+  44:     ursprunglig_bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+  45:     skärmstorlek = metadata.get("skärmstorlek", [1280, 720])
+  46:     fönster_bredd = skärmstorlek[0] // 2
+  47:     fönster_höjd = fönster_bredd * 9 // 16
+  48:     skal_x = ursprunglig_bredd / fönster_bredd
+  49:     mållinje_x = metadata.get("mållinje_x")
+  50:     mållinje_x_scaled = int(mållinje_x / skal_x) if mållinje_x else None
+  51: 
+  52:     cv2.namedWindow("Analys", cv2.WINDOW_NORMAL)
+  53:     cv2.resizeWindow("Analys", fönster_bredd, fönster_höjd)
+  54:     cv2.moveWindow("Analys", skärmstorlek[0] // 2, 0)
+  55: 
+  56:     loggade_tider = {str(nr): "DNF" for nr in startlista.keys()}
+  57:     frame_index = 0
+  58:     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+  59:     aktiv_hund = None
+  60:     klick_före = klick_efter = frame_före = frame_efter = aktuell_frame = None
+  61: 
+  62:     def klick(event, x, y, flags, param):
+  63:         nonlocal klick_före, klick_efter, frame_före, frame_efter, aktiv_hund
+  64:         if event == cv2.EVENT_LBUTTONDOWN and aktiv_hund:
+  65:             ursprunglig_x = int(x * skal_x)
+  66:             if klick_före is None:
+  67:                 klick_före = ursprunglig_x
+  68:                 frame_före = frame_index
+  69:                 print(f"🐾 Hund {aktiv_hund}: nos före målgång markerad (frame {frame_före}, x={klick_före})")
+  70:             elif klick_efter is None:
+  71:                 klick_efter = ursprunglig_x
+  72:                 frame_efter = frame_index
+  73:                 print(f"🐾 Hund {aktiv_hund}: nos efter målgång markerad (frame {frame_efter}, x={klick_efter})")
+  74:                 if frame_tider and frame_före < len(frame_tider) and frame_efter < len(frame_tider):
+  75:                     tid_före = frame_tider[frame_före]
+  76:                     tid_efter = frame_tider[frame_efter]
+  77:                 else:
+  78:                     tid_före = frame_före / fps + fördröjning
+  79:                     tid_efter = frame_efter / fps + fördröjning
+  80:                 tid = logga_tid(aktiv_hund, tid_före, tid_efter, klick_före, klick_efter, mållinje_x)
+  81:                 if tid is not None:
+  82:                     hund_id = str(aktiv_hund)
+  83:                     if hund_id not in loggade_tider:
+  84:                         loggade_tider[hund_id] = []
+  85:                     loggade_tider[hund_id] = [tid]
+  86:                     print(f"✅ Tid loggad för hund {hund_id}: {tid:.3f} s")
+  87:                     visa_loggningsstatus(loggade_tider, startlista)
+  88:                 aktiv_hund = None
+  89:                 klick_före = klick_efter = frame_före = frame_efter = None
+  90: 
+  91:     cv2.setMouseCallback("Analys", klick)
+  92: 
+  93:     while True:
+  94:         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+  95:         ret, frame = cap.read()
+  96:         if not ret:
+  97:             print("❌ Kunde inte läsa frame.")
+  98:             break
+  99:         frame = cv2.resize(frame, (fönster_bredd, fönster_höjd), interpolation=cv2.INTER_AREA)
+ 100:         aktuell_frame = frame.copy()
+ 101:         tid = frame_tider[frame_index] if frame_tider and frame_index < len(frame_tider) else (frame_index / fps) + fördröjning
+ 102:         overlay = rita_overlay(aktuell_frame, mållinje_x_scaled, None)
+ 103:         cv2.putText(overlay, f"Frame: {frame_index}/{total_frames}", (10, 70),
+ 104:                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+ 105:         cv2.imshow("Analys", overlay)
+ 106:         tangent = cv2.waitKey(0) & 0xFF
+ 107: 
+ 108:         if tangent == ord('q'):
+ 109:             break
+ 110:         elif tangent == ord('a'):
+ 111:             frame_index = max(0, frame_index - 1)
+ 112:         elif tangent == ord('d'):
+ 113:             frame_index = min(total_frames - 1, frame_index + 1)
+ 114:         elif tangent in [ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6')]:
+ 115:             aktiv_hund = int(chr(tangent))
+ 116:             print(f"🎯 Loggar hund {aktiv_hund}. Klicka nos före och efter målgång.")
+ 117:         elif tangent == ord('z'):
+ 118:             print("ℹ️ Använd [r] i analysmenyn för att återställa tider till DNF.")
+ 119: 
+ 120:     cv2.destroyWindow("Analys")
+ 121:     return loggade_tider
+ 122: 
+ 123: def spara_analysresultat(videofil, loggade_tider):
+ 124:     tidstext = datetime.now().strftime("%H-%M-%S")
+ 125:     datum_mapp = os.path.dirname(videofil)
+ 126:     basnamn = os.path.basename(videofil).replace(".avi", "")
+ 127:     filnamn = f"{sanera_filnamn(basnamn)}__analys__{tidstext}.json"
+ 128:     sökväg = relativ_sökväg(datum_mapp, filnamn)
+ 129: 
+ 130:     with open(sökväg, "w") as f:
+ 131:         json.dump(loggade_tider, f, indent=2, ensure_ascii=False)
+ 132: 
+ 133:     print(f"💾 Analysresultat sparat: {sökväg}")
+
+
+# --- analys_main.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import cv2
+   4: import json
+   5: from analys_loader import ladda_video_och_metadata
+   6: from analys_logger import hantera_loggning, spara_analysresultat
+   7: from analys_summary import visa_sammanfattning
+   8: from textutils import normalisera, sanera_filnamn
+   9: from sammanfattning import (
+  10:     spara_sammanfattning_json,
+  11:     fråga_om_export
+  12: )
+  13: from confighantering import ladda_config
+  14: 
+  15: def hantera_analysval(index, matchande_videor):
+  16:     print("\n🎞️ Tillgängliga videor:")
+  17:     for i, filnamn in enumerate(matchande_videor, start=1):
+  18:         print(f"  {i}. {filnamn}")
+  19: 
+  20:     print("\n🧭 Tangenter: [v] välj video, [s] sammanfatta, [r] radera tider, [q] avsluta")
+  21:     val = input("👉 Välj: ").strip().lower()
+  22: 
+  23:     if val == "v":
+  24:         try:
+  25:             val_num = int(input(f"👉 Ange videonummer (1–{len(matchande_videor)}): ").strip())
+  26:             if 1 <= val_num <= len(matchande_videor):
+  27:                 return val_num - 1
+  28:             else:
+  29:                 print("❌ Ogiltigt nummer.")
+  30:                 return "upprepa"
+  31:         except ValueError:
+  32:             print("❌ Ange ett heltal.")
+  33:             return "upprepa"
+  34:     elif val == "s":
+  35:         return "sammanfatta"
+  36:     elif val == "r":
+  37:         return "radera"
+  38:     elif val == "q":
+  39:         return "avsluta"
+  40:     else:
+  41:         print("❌ Ogiltigt val – försök igen.")
+  42:         return "upprepa"
+  43: 
+  44: 
+  45: def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, startlista_namn=None, startlista=None, lopp_index=None):
+  46:     videomapp = os.path.dirname(videofil)
+  47:     alla_filer = sorted(f for f in os.listdir(videomapp) if f.endswith(".avi"))
+  48:     basnamn = os.path.basename(videofil).replace(".avi", "")
+  49: 
+  50:     # Hitta alla videor från samma lopp (baserat på filnamnsstruktur)
+  51:     prefix = "__".join(basnamn.split("__")[:2])
+  52:     matchande = [f for f in alla_filer if f.startswith(prefix)]
+  53:     if not matchande:
+  54:         print("❌ Inga matchande videor hittades.")
+  55:         return
+  56: 
+  57:     print(f"\n📁 Laddar analys för lopp: {valt_loppnamn}")
+  58:     print(f"🎞️ Antal videor att analysera: {len(matchande)}")
+  59: 
+  60:     index = 0
+  61:     loggade_tider_total = {}
+  62: 
+  63:     while True:
+  64:         val = hantera_analysval(index, matchande)
+  65:         if val == "avsluta":
+  66:             break
+  67:         elif val == "sammanfatta":
+  68:             visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+  69:             continue
+  70:         elif val == "radera":
+  71:             hund_id = input("🗑️ Ange hundnummer att återställa till DNF: ").strip()
+  72:             if hund_id in loggade_tider_total:
+  73:                 loggade_tider_total[hund_id] = "DNF"
+  74:                 print(f"↩️ Alla tider för hund {hund_id} återställda till DNF.")
+  75:             else:
+  76:                 print("ℹ️ Ingen tid loggad för den hunden.")
+  77:             continue
+  78:         elif isinstance(val, int):
+  79:             index = val
+  80:         else:
+  81:             continue  # Ogiltigt val, upprepa
+  82: 
+  83:         aktuell_fil = os.path.join(videomapp, matchande[index])
+  84:         print(f"\n🎞️ Öppnar video {index+1}/{len(matchande)}: {matchande[index]}")
+  85:         cap, metadata, startlista_dict, loppnamn, startlista_namn = ladda_video_och_metadata(aktuell_fil, valt_loppnamn)
+  86:         if not cap:
+  87:             print("❌ Kunde inte ladda video.")
+  88:             return
+  89: 
+  90:         loggade_tider = hantera_loggning(cap, metadata, startlista_dict)
+  91: 
+  92:         # Slå ihop tider
+  93:         for hund, tider in loggade_tider.items():
+  94:             if hund not in loggade_tider_total:
+  95:                 loggade_tider_total[hund] = []
+  96:             loggade_tider_total[hund].extend(tider if isinstance(tider, list) else [tider])
+  97: 
+  98:     # Avslutande sammanfattning
+  99:     print("\n📋 Slutlig sammanfattning:")
+ 100:     visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+ 101: 
+ 102:     # Automatisk sparning om tider finns
+ 103:     if loggade_tider_total:
+ 104:         from metadata import spara_metadata_och_frame_tider as spara_resultat
+ 105:         spara_analysresultat(aktuell_fil, loggade_tider_total)
+ 106: 
+ 107:         loppnamn_sanerat = sanera_filnamn(valt_loppnamn)
+ 108:         spara_sammanfattning_json(startlista_namn, loppnamn_sanerat, loggade_tider_total, metadata, startlista_dict)
+ 109:         fråga_om_export(startlista_namn, loppnamn_sanerat, loggade_tider_total, startlista_dict)
+ 110: 
+ 111:         print("💾 Resultat sparat automatiskt.")
+ 112:     else:
+ 113:         print("⚠️ Inga tider loggade – resultat sparas inte.")
+ 114: 
+ 115:     print("🏁 Analys klar.")
+ 116: 
+ 117:     # Hoppa till nästa lopp om tillåtet
+ 118:     if tillåt_nästa_lopp and startlista_namn and startlista and lopp_index is not None:
+ 119:         from tavling import starta_tavlingsläge
+ 120:         if isinstance(startlista, list):
+ 121:             if lopp_index + 1 < len(startlista):
+ 122:                 nästa_lopp = startlista[lopp_index + 1]
+ 123:                 print(f"\n⏱️ Nästa lopp: {nästa_lopp['lopp_namn']}")
+ 124:                 config = ladda_config()
+ 125:                 config["senaste_lopp_id"] = lopp_index + 2
+ 126:                 starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1, hoppa_fortsättningsfråga=True)
+ 127:             else:
+ 128:                 print("✅ Alla lopp är analyserade – tävlingspasset är klart.")
+ 129:         else:
+ 130:             print("⚠️ Kunde inte hoppa till nästa lopp – startlista saknas eller är inte en lista.")
+ 131: 
+
+
+# --- analys_overlay.py ---
+
+   1: import cv2
+   2: 
+   3: def rita_overlay(frame, mållinje_x=None, tid_str=None):
+   4:     """
+   5:     Ritar mållinje och instruktioner på videoframe.
+   6:     """
+   7:     höjd, bredd = frame.shape[:2]
+   8:     x = bredd // 2 if mållinje_x is None else int(mållinje_x)
+   9: 
+  10:     # Röd mållinje
+  11:     cv2.line(frame, (x, 0), (x, höjd), (0, 0, 255), 2)
+  12: 
+  13:     # Tidtext
+  14:     if tid_str:
+  15:         cv2.putText(frame, tid_str, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+  16: 
+  17:     # Instruktioner
+  18:     instruktion = "A/D = BACKA/FRAM, 1-6 = VAL AV HUND, Q = AVSLUTA"
+  19:     fontstorlek = max(0.5, min(1.2, höjd / 600))
+  20:     cv2.putText(frame, instruktion, (10, höjd - 20), cv2.FONT_HERSHEY_SIMPLEX, fontstorlek, (0, 0, 255), 2)
+  21: 
+  22:     return frame
+
+
+# --- analys_summary.py ---
+
+   1: from paths import relativ_sökväg
+   2: from textutils import sanera_filnamn
+   3: 
+   4: def visa_loggningsstatus(loggade_tider, startlista):
+   5:     print("\n📋 Loggningsstatus:")
+   6:     for hundnummer in sorted(startlista.keys(), key=int):
+   7:         info = startlista.get(hundnummer, {})
+   8:         namn = info.get("namn", f"Hund {hundnummer}")
+   9:         tider = loggade_tider.get(hundnummer, [])
+  10:         status = f"{len(tider)} tider" if tider else "❌"
+  11:         print(f"  Hund {hundnummer}: {namn} {status}")
+  12: def visa_sammanfattning(loppnamn, loggade_tider, startlista):
+  13:     print(f"\n📋 Sammanfattning för {loppnamn}:")
+  14:     if not loggade_tider:
+  15:         print("⚠️ Inga tider loggade.")
+  16:         return
+  17: 
+  18:     def extrahera_tider(tider):
+  19:         if isinstance(tider, str) and tider == "DNF":
+  20:             return []
+  21:         if isinstance(tider, list):
+  22:             return [
+  23:                 t["tid"] if isinstance(t, dict) and "tid" in t else t
+  24:                 for t in tider
+  25:                 if isinstance(t, (float, int)) or (isinstance(t, dict) and "tid" in t)
+  26:             ]
+  27:         elif isinstance(tider, dict) and "tid" in tider:
+  28:             return [tider["tid"]]
+  29:         elif isinstance(tider, (float, int)):
+  30:             return [tider]
+  31:         return []
+  32: 
+  33:     sorterade = sorted(
+  34:         loggade_tider.items(),
+  35:         key=lambda x: max(extrahera_tider(x[1])) if extrahera_tider(x[1]) else float('inf')
+  36:     )
+  37: 
+  38:     for placering, (hundnummer, tider) in enumerate(sorterade, start=1):
+  39:         info = startlista.get(str(hundnummer), {})
+  40:         namn = info.get("namn", f"Hund {hundnummer}")
+  41:         klubb = info.get("klubb", "")
+  42:         tider_lista = extrahera_tider(tider)
+  43:         if tider_lista:
+  44:             tider_str = ", ".join(f"{t:.3f}s" for t in sorted(tider_lista))
+  45:         else:
+  46:             tider_str = "DNF"
+  47:         print(f"  {placering}. Hund {hundnummer} ({namn}) {klubb}: {tider_str}")
+
+
+# --- arduino.py ---
+
+   1: import serial.tools.list_ports
+   2: 
+   3: def välj_arduino_port():
+   4:     """
+   5:     Söker efter tillgängliga COM-portar och låter användaren välja.
+   6:     Bekräftar att en Arduino är ansluten genom att försöka öppna porten.
+   7:     Returnerar vald portsträng, t.ex. 'COM3'.
+   8:     """
+   9: 
+  10:     portar = list(serial.tools.list_ports.comports())
+  11:     if not portar:
+  12:         print("❌ Inga portar hittades.")
+  13:         return None
+  14: 
+  15:     print(f"🔍 {len(portar)} portar hittades.")
+  16:     for i, port in enumerate(portar):
+  17:         print(f"{i}: {port.device}")
+  18: 
+  19:     while True:
+  20:         try:
+  21:             val = int(input("👉 Ange numret för önskad port: "))
+  22:             if 0 <= val < len(portar):
+  23:                 vald_port = portar[val].device
+  24:                 print(f"✅ Arduino hittades på {vald_port}. Använd denna? (J/N): ", end="")
+  25:                 svar = input().strip().lower()
+  26:                 if svar == "j":
+  27:                     # Testa att öppna porten
+  28:                     try:
+  29:                         ser = serial.Serial(vald_port, 9600, timeout=1)
+  30:                         ser.close()
+  31:                         print(f"🔌 Ansluten till Arduino på {vald_port}")
+  32:                         return vald_port
+  33:                     except serial.SerialException:
+  34:                         print("⚠️ Kunde inte öppna porten. Välj en annan.")
+  35:                 else:
+  36:                     print("🔁 Välj en annan port.")
+  37:             else:
+  38:                 print("⚠️ Ogiltigt val. Försök igen.")
+  39:         except ValueError:
+  40:             print("⚠️ Ange ett heltal.")
+
+
+# --- confighantering.py ---
+
+   1: from paths import relativ_sökväg
+   2: import json
+   3: import os
+   4: 
+   5: CONFIGFIL = relativ_sökväg("data/config.json")
+   6: 
+   7: def ladda_config():
+   8:     if os.path.exists(CONFIGFIL):
+   9:         try:
+  10:             with open(CONFIGFIL, "r") as f:
+  11:                 return json.load(f)
+  12:         except json.JSONDecodeError:
+  13:             print("⚠️ Fel i config.json – laddar standardvärden.")
+  14:     else:
+  15:         print("📁 Ingen config-fil hittad – laddar standardvärden.")
+  16: 
+  17:     return {
+  18:         "kamera_index": None,
+  19:         "kamera_fps": None,
+  20:         "verifierad_fps": None,
+  21:         "arduino_port": None,
+  22:         "senaste_lopp_id": 1
+  23:     }
+  24: 
+  25: def spara_config(config):
+  26:     try:
+  27:         with open(CONFIGFIL, "w") as f:
+  28:             json.dump(config, f, indent=2)
+  29:         print("💾 Inställningar sparade.")
+  30:     except Exception as e:
+  31:         print(f"❌ Kunde inte spara config: {e}")
+
+
+# --- exportera_excel.py ---
+
+   1: import re
+   2: 
+   3: def skapa_filnamn(loppnamn):
+   4:     # Ersätt mellanslag med understreck, ta bort specialtecken
+   5:     filnamn = loppnamn.strip().lower()
+   6:     filnamn = filnamn.replace("å", "a").replace("ä", "a").replace("ö", "o")
+   7:     filnamn = re.sub(r"[^\w\s-]", "", filnamn)
+   8:     filnamn = re.sub(r"\s+", "_", filnamn)
+   9:     return f"{filnamn}.xlsx"
+
+
+# --- gemensamt.py ---
+
+   1: from paths import relativ_sökväg
+   2: import json
+   3: from textutils import sanera_filnamn, normalisera
+   4: 
+   5: def ladda_startlista(filnamn):
+   6:     """
+   7:     Läser in en startlista från en JSON-fil och returnerar en lista med lopp.
+   8:     Varje lopp innehåller namn, distans och en filtrerad lista med hundar.
+   9:     """
+  10:     sökväg = relativ_sökväg("startlistor", sanera_filnamn(filnamn) + ".json")
+  11:     try:
+  12:         with open(sökväg, "r", encoding="utf-8") as f:
+  13:             data = json.load(f)
+  14:     except FileNotFoundError:
+  15:         print(f"❌ Startlista saknas: {sökväg}")
+  16:         return []
+  17:     except json.JSONDecodeError:
+  18:         print(f"❌ Ogiltigt JSON-format i: {sökväg}")
+  19:         return []
+  20: 
+  21:     if not isinstance(data, list):
+  22:         print("❌ Ogiltigt format – förväntar lista av lopp.")
+  23:         return []
+  24: 
+  25:     lopp = []
+  26:     for entry in data:
+  27:         hundar = entry.get("hundar", {})
+  28:         filtrerade = [
+  29:             {"nummer": int(nr), "namn": namn}
+  30:             for nr, namn in hundar.items()
+  31:             if namn.strip()
+  32:         ]
+  33:         if filtrerade:
+  34:             lopp.append({
+  35:                 "lopp_namn": entry.get("lopp_namn", "Okänt"),
+  36:                 "distans": entry.get("distans", None),
+  37:                 "hundar": filtrerade
+  38:             })
+  39:     return lopp
+
+
+# --- inspelning.py ---
+
+   1: import cv2
+   2: import time
+   3: import os
+   4: from textutils import ersätt_svenska_tecken
+   5: 
+   6: def rita_overlay(frame, mållinje_x=None, tid_str=None):
+   7:     höjd, bredd = frame.shape[:2]
+   8:     x = mållinje_x if mållinje_x is not None else bredd // 2
+   9:     cv2.line(frame, (x, 0), (x, höjd), (0, 0, 255), 2)
+  10:     if tid_str:
+  11:         tid_str = ersätt_svenska_tecken(tid_str)
+  12:         cv2.putText(frame, tid_str, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+  13:     return frame
+  14: 
+  15: def kör_inspelningsloop(cap, config, start_tid, spara_mapp, filnamnsbas, mållinje_x=None, max_tid_för_frame_tider=75):
+  16:     screen_width = config.get("skärmstorlek", [1280, 720])[0]
+  17:     fönster_bredd = screen_width // 2
+  18:     fönster_höjd = fönster_bredd * 9 // 16
+  19:     x_pos = screen_width // 2
+  20:     y_pos = 0
+  21: 
+  22:     inspelning_aktiv = False
+  23:     inspelningar = []
+  24:     fps = config["kamera_fps"]
+  25:     justerad_latens_ms = config.get("justerad_latens_ms", 0)
+  26: 
+  27:     print("🎬 Tryck [mellanslag] för att starta/pausa inspelning, [q] för att avsluta.")
+  28:     while True:
+  29:         ret, frame = cap.read()
+  30:         if not ret:
+  31:             break
+  32:         elapsed = time.time() - start_tid
+  33:         justerad_tid = elapsed - (justerad_latens_ms / 1000)
+  34:         tid_str = f"{justerad_tid:.3f} s"
+  35:         frame_overlay = rita_overlay(frame.copy(), mållinje_x, tid_str)
+  36: 
+  37:         if inspelning_aktiv:
+  38:             höjd, bredd = frame_overlay.shape[:2]
+  39:             rec_x = bredd - 100
+  40:             rec_y = 30
+  41:             cv2.circle(frame_overlay, (rec_x, rec_y), 10, (0, 0, 255), -1)
+  42:             cv2.putText(frame_overlay, "REC", (rec_x + 20, rec_y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+  43: 
+  44:             if not inspelningar or not inspelningar[-1]["aktiv"]:
+  45:                 inspelnings_start_tid = time.time()
+  46:                 inspelningsnummer = len(inspelningar) + 1
+  47:                 filnamn = f"{filnamnsbas}__{inspelningsnummer}.avi"
+  48:                 sökväg = os.path.join(spara_mapp, filnamn)
+  49:                 writer = cv2.VideoWriter(sökväg, cv2.VideoWriter_fourcc(*'XVID'), fps, (bredd, höjd))
+  50:                 inspelningar.append({
+  51:                     "fil": sökväg,
+  52:                     "writer": writer,
+  53:                     "aktiv": True,
+  54:                     "starttid": inspelnings_start_tid,
+  55:                     "frame_tider": [],
+  56:                     "inspelningsnummer": inspelningsnummer
+  57:                 })
+  58:             inspelningar[-1]["writer"].write(frame_overlay)
+  59: 
+  60:             inspelningstid = time.time() - inspelningar[-1]["starttid"]
+  61:             if inspelningstid <= max_tid_för_frame_tider:
+  62:                 inspelningar[-1]["frame_tider"].append(round(justerad_tid, 6))
+  63: 
+  64:         cv2.namedWindow("Tidtagning", cv2.WINDOW_NORMAL)
+  65:         cv2.resizeWindow("Tidtagning", fönster_bredd, fönster_höjd)
+  66:         cv2.moveWindow("Tidtagning", x_pos, y_pos)
+  67:         cv2.imshow("Tidtagning", frame_overlay)
+  68:         tangent = cv2.waitKey(1) & 0xFF
+  69:         if tangent == ord(' '):
+  70:             inspelning_aktiv = not inspelning_aktiv
+  71:             print("▶️ Startar inspelning" if inspelning_aktiv else "⏸️ Pausar inspelning")
+  72:             if not inspelning_aktiv and inspelningar:
+  73:                 inspelningar[-1]["writer"].release()
+  74:                 inspelningar[-1]["aktiv"] = False
+  75:         elif tangent == ord('q'):
+  76:             print("🛑 Avslutar inspelning.")
+  77:             break
+  78: 
+  79:     cap.release()
+  80:     for insp in inspelningar:
+  81:         if insp["aktiv"]:
+  82:             insp["writer"].release()
+  83:     cv2.destroyAllWindows()
+  84:     return inspelningar
+
+
+# --- installningar_meny.py ---
+
+   1: import os
+   2: import json
+   3: import platform
+   4: import time
+   5: import cv2
+   6: import serial.tools.list_ports
+   7: from paths import relativ_sökväg
+   8: 
+   9: CONFIGFIL = relativ_sökväg("data/config.json")
+  10: LATENSFIL = relativ_sökväg("data/latens_config.json")
+  11: 
+  12: def las_config():
+  13:     if not os.path.exists(CONFIGFIL):
+  14:         return {}
+  15:     with open(CONFIGFIL, "r") as f:
+  16:         return json.load(f)
+  17: 
+  18: def spara_config(config):
+  19:     os.makedirs(os.path.dirname(CONFIGFIL), exist_ok=True)
+  20:     with open(CONFIGFIL, "w") as f:
+  21:         json.dump(config, f, indent=2)
+  22: 
+  23: def installningsmeny():
+  24:     while True:
+  25:         config = las_config()
+  26:         print("\n⚙️ INSTÄLLNINGAR")
+  27:         print(f"1. Andra kamera och FPS (nu: index {config.get('kamera_index')} @ {config.get('kamera_fps')} FPS)")
+  28:         print(f"2. Andra Arduino-port (nu: {config.get('arduino_port')})")
+  29:         print("3. Kalibrera kamera")
+  30:         print("4. Visa aktuell konfiguration")
+  31:         print("5. Tillbaka till huvudmenyn")
+  32:         val = input("👉 Välj (1–5): ").strip()
+  33: 
+  34:         if val == "1":
+  35:             andra_kamera(config)
+  36:         elif val == "2":
+  37:             andra_arduino(config)
+  38:         elif val == "3":
+  39:             kalibrera_kamera()
+  40:         elif val == "4":
+  41:             visa_konfiguration(config)
+  42:         elif val == "5":
+  43:             break
+  44:         else:
+  45:             print("❌ Ogiltigt val. Försök igen.")
+  46: 
+  47: def andra_kamera(config):
+  48:     print("\n🎥 Väljer ny kamera och FPS...")
+  49:     tillgängliga = []
+  50:     for i in range(5):
+  51:         cap = cv2.VideoCapture(i)
+  52:         if cap.isOpened():
+  53:             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+  54:             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+  55:             fps = cap.get(cv2.CAP_PROP_FPS)
+  56:             tillgängliga.append((i, w, h, fps))
+  57:             cap.release()
+  58: 
+  59:     if not tillgängliga:
+  60:         print("❌ Inga kameror hittades.")
+  61:         return
+  62: 
+  63:     print("\n📋 Tillgängliga kameror:")
+  64:     for i, (index, w, h, fps) in enumerate(tillgängliga, start=1):
+  65:         print(f"{i}. Index {index} – {w}x{h} @ {int(fps)} FPS")
+  66: 
+  67:     while True:
+  68:         val = input("👉 Välj kamera (nummer): ").strip()
+  69:         if val.isdigit() and 1 <= int(val) <= len(tillgängliga):
+  70:             valt_index = tillgängliga[int(val) - 1][0]
+  71:             break
+  72:         print("❌ Ogiltigt val.")
+  73: 
+  74:     print("\n🎞️ Välj önskad FPS:")
+  75:     print("1. 30 fps\n2. 60 fps\n3. 100 fps\n4. 120 fps")
+  76:     fps_dict = {"1": 30, "2": 60, "3": 100, "4": 120}
+  77:     while True:
+  78:         val = input("👉 Välj (1–4): ").strip()
+  79:         if val in fps_dict:
+  80:             fps_val = fps_dict[val]
+  81:             break
+  82:         print("❌ Ogiltigt val.")
+  83: 
+  84:     cap = cv2.VideoCapture(valt_index)
+  85:     cap.set(cv2.CAP_PROP_FPS, fps_val)
+  86:     verifierad_fps = cap.get(cv2.CAP_PROP_FPS)
+  87:     cap.release()
+  88: 
+  89:     config["kamera_index"] = valt_index
+  90:     config["kamera_fps"] = fps_val
+  91:     config["verifierad_fps"] = round(verifierad_fps, 2)
+  92:     spara_config(config)
+  93:     print(f"\n💾 Kamera-inställningar sparade: index {valt_index}, FPS {fps_val} (verifierad: {verifierad_fps:.2f})")
+  94: 
+  95: def andra_arduino(config):
+  96:     print("\n🔌 Söker efter Arduino-enheter...")
+  97:     portar = list(serial.tools.list_ports.comports())
+  98:     if not portar:
+  99:         print("❌ Inga enheter hittades.")
+ 100:         return
+ 101: 
+ 102:     for i, port in enumerate(portar, start=1):
+ 103:         print(f"{i}. {port.device} – {port.description}")
+ 104:     while True:
+ 105:         val = input("👉 Välj port (nummer): ").strip()
+ 106:         if val.isdigit() and 1 <= int(val) <= len(portar):
+ 107:             vald_port = portar[int(val) - 1].device
+ 108:             break
+ 109:         print("❌ Ogiltigt val.")
+ 110: 
+ 111:     config["arduino_port"] = vald_port
+ 112:     spara_config(config)
+ 113:     print(f"\n💾 Arduino-port sparad: {vald_port}")
+ 114: 
+ 115: def kalibrera_kamera():
+ 116:     print("\n📡 Startar kalibrering...")
+ 117:     try:
+ 118:         import kalibrera_kamera
+ 119:         kamera_index, fps = las_config().get("kamera_index"), las_config().get("kamera_fps")
+ 120:         if kamera_index is None or fps is None:
+ 121:             print("⚠️ Kamera måste väljas först.")
+ 122:             return
+ 123:         kalibrera_kamera.kör_kalibrering(kamera_index, fps)
+ 124:     except Exception as e:
+ 125:         print(f"❌ Fel vid kalibrering: {e}")
+ 126: 
+ 127: def visa_konfiguration(config):
+ 128:     print("\n📦 Aktuell konfiguration:")
+ 129:     for nyckel, värde in config.items():
+ 130:         print(f"  {nyckel}: {värde}")
+ 131:     if os.path.exists(LATENSFIL):
+ 132:         with open(LATENSFIL, "r") as f:
+ 133:             latensdata = json.load(f)
+ 134:         print("\n📈 Kalibrerad latensdata:")
+ 135:         for nyckel, värde in latensdata.items():
+ 136:             print(f"  {nyckel}: {värde}")
+
+
+# --- inställningar.py ---
+
+   1: from paths import relativ_sökväg
+   2: import cv2
+   3: import serial.tools.list_ports
+   4: import json
+   5: import os
+   6: import time
+   7: import platform
+   8: from textutils import ersätt_svenska_tecken
+   9: 
+  10: CONFIGFIL = relativ_sökväg("data/config.json")
+  11: 
+  12: def verifiera_faktisk_fps(index, fps_val, mätningssekunder=3):
+  13:     cap = cv2.VideoCapture(index)
+  14:     cap.set(cv2.CAP_PROP_FPS, fps_val)
+  15: 
+  16:     print(f"\n🧪 Mäter faktisk FPS under {mätningssekunder} sekunder...")
+  17:     start = time.time()
+  18:     räknare = 0
+  19: 
+  20:     while True:
+  21:         ret, frame = cap.read()
+  22:         if not ret:
+  23:             print("❌ Kunde inte läsa bild.")
+  24:             break
+  25:         räknare += 1
+  26:         if time.time() - start >= mätningssekunder:
+  27:             break
+  28: 
+  29:     cap.release()
+  30:     faktisk_fps = räknare / mätningssekunder
+  31:     print(f"📊 Faktisk FPS: {faktisk_fps:.2f} (begärt: {fps_val})")
+  32:     return round(faktisk_fps, 2)
+  33: 
+  34: def välj_kamera_med_förhandsvisning():
+  35:     print("\n🔍 Söker efter tillgängliga kameror...")
+  36:     tillgängliga = []
+  37: 
+  38:     for index in range(5):
+  39:         if platform.system() == "Windows":
+  40:             cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+  41:         else:
+  42:             cap = cv2.VideoCapture(index)
+  43: 
+  44:         if cap.isOpened():
+  45:             ret, frame = cap.read()
+  46:             if ret:
+  47:                 w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+  48:                 h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+  49:                 tillgängliga.append((index, w, h))
+  50:         cap.release()
+  51: 
+  52:     if not tillgängliga:
+  53:         print("❌ Inga kameror hittades.")
+  54:         return None, None, None
+  55: 
+  56:     print("\n📋 Tillgängliga kameror:")
+  57:     for i, (index, w, h) in enumerate(tillgängliga, start=1):
+  58:         print(f"{i}. Index {index} – {w}x{h}")
+  59: 
+  60:     while True:
+  61:         try:
+  62:             val = int(input("👉 Välj kamera (nummer): "))
+  63:             if 1 <= val <= len(tillgängliga):
+  64:                 valt_index = tillgängliga[val - 1][0]
+  65:                 break
+  66:         except ValueError:
+  67:             pass
+  68:         print("❌ Ogiltigt val. Försök igen.")
+  69: 
+  70:     print("\n🎞️ Välj önskad bildfrekvens (FPS):")
+  71:     print("1. 30 fps")
+  72:     print("2. 60 fps")
+  73:     print("3. 100 fps")
+  74:     print("4. 120 fps")
+  75:     fps_val = None
+  76:     while True:
+  77:         val = input("👉 Välj (1–4): ").strip()
+  78:         if val == "1":
+  79:             fps_val = 30
+  80:             break
+  81:         elif val == "2":
+  82:             fps_val = 60
+  83:             break
+  84:         elif val == "3":
+  85:             fps_val = 100
+  86:             break
+  87:         elif val == "4":
+  88:             fps_val = 120
+  89:             break
+  90:         else:
+  91:             print("❌ Ogiltigt val. Försök igen.")
+  92: 
+  93:     if platform.system() == "Windows":
+  94:         cap = cv2.VideoCapture(valt_index, cv2.CAP_DSHOW)
+  95:     else:
+  96:         cap = cv2.VideoCapture(valt_index)
+  97:     cap.set(cv2.CAP_PROP_FPS, fps_val)
+  98:     verifierad_fps = cap.get(cv2.CAP_PROP_FPS)
+  99:     print(f"📡 Begärd FPS: {fps_val} – Kameran rapporterar: {verifierad_fps:.1f} fps")
+ 100: 
+ 101:     print("\n📺 Visar live-feed från vald kamera. Tryck 'q' för att bekräfta, eller vänta 10 sekunder.")
+ 102:     cv2.namedWindow("Förhandsvisning", cv2.WINDOW_NORMAL)
+ 103: 
+ 104: # 📐 Skärmstorlek och fönsterplacering
+ 105:     screen_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) * 2  # fallback om Tkinter inte funkar
+ 106:     screen_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) * 2
+ 107: 
+ 108:     try:
+ 109:         import tkinter as tk
+ 110:         root = tk.Tk()
+ 111:         root.withdraw()
+ 112:         screen_width = root.winfo_screenwidth()
+ 113:         screen_height = root.winfo_screenheight()
+ 114:     except:
+ 115:         pass  # fallback används
+ 116: 
+ 117:     fönster_bredd = screen_width // 2
+ 118:     fönster_höjd = screen_height // 2
+ 119:     x_pos = screen_width // 2
+ 120:     y_pos = 0
+ 121: 
+ 122:     cv2.resizeWindow("Förhandsvisning", fönster_bredd, fönster_höjd)
+ 123:     cv2.moveWindow("Förhandsvisning", x_pos, y_pos)
+ 124: 
+ 125:     start_tid = time.time()
+ 126:     confirmed = False
+ 127: 
+ 128:     while True:
+ 129:         ret, frame = cap.read()
+ 130:         if not ret:
+ 131:             print("❌ Kunde inte läsa bild från kameran.")
+ 132:             break
+ 133:         cv2.imshow("Förhandsvisning", frame)
+ 134:         if cv2.waitKey(1) & 0xFF == ord('q'):
+ 135:             confirmed = True
+ 136:             break
+ 137:         if time.time() - start_tid > 10:
+ 138:             break
+ 139: 
+ 140:     cv2.destroyAllWindows()
+ 141:     cap.release()
+ 142: 
+ 143:     if confirmed:
+ 144:         faktisk_fps = verifiera_faktisk_fps(valt_index, fps_val)
+ 145:         return valt_index, fps_val, faktisk_fps
+ 146:     else:
+ 147:         svar = input("✅ Är detta rätt kamera? (j/n): ").strip().lower()
+ 148:         if svar == "j":
+ 149:             faktisk_fps = verifiera_faktisk_fps(valt_index, fps_val)
+ 150:             return valt_index, fps_val, faktisk_fps
+ 151:         else:
+ 152:             print("🔁 Välj en annan kamera.")
+ 153:             return välj_kamera_med_förhandsvisning()
+ 154: 
+ 155: def välj_arduino_port():
+ 156:     print("\n🔌 Söker efter inkopplade Arduino-enheter...")
+ 157:     portar = list(serial.tools.list_ports.comports())
+ 158:     if not portar:
+ 159:         print("❌ Inga Arduino-enheter hittades.")
+ 160:         return None
+ 161: 
+ 162:     for i, port in enumerate(portar, start=1):
+ 163:         print(f"{i}. {port.device} – {port.description}")
+ 164:     while True:
+ 165:         try:
+ 166:             val = int(input("👉 Välj Arduino-port (nummer): "))
+ 167:             if 1 <= val <= len(portar):
+ 168:                 return portar[val - 1].device
+ 169:         except ValueError:
+ 170:             pass
+ 171:         print("❌ Ogiltigt val. Försök igen.")
+ 172: 
+ 173: def ändra_inställningar(config):
+ 174:     kamera_index, kamera_fps, verifierad_fps = välj_kamera_med_förhandsvisning()
+ 175:     if kamera_index is None:
+ 176:         print("❌ Ingen kamera valdes.")
+ 177:         return
+ 178: 
+ 179:     arduino_port = välj_arduino_port()
+ 180:     if arduino_port is None:
+ 181:         print("❌ Ingen Arduino valdes.")
+ 182:         return
+ 183: 
+ 184:     config["kamera_index"] = kamera_index
+ 185:     config["kamera_fps"] = kamera_fps
+ 186:     config["verifierad_fps"] = verifierad_fps
+ 187:     config["arduino_port"] = arduino_port
+ 188:     with open(CONFIGFIL, "w") as f:
+ 189:         json.dump(config, f, indent=2)
+ 190:     print(f"\n💾 Inställningar sparade:")
+ 191:     print(f"  Kamera-index: {kamera_index}")
+ 192:     print(f"  Begärd FPS: {kamera_fps}")
+ 193:     print(f"  Verifierad FPS: {verifierad_fps}")
+ 194:     print(f"  Arduino-port: {arduino_port}")
+
+
+# --- kalibrera_kamera.py ---
+
+   1: import cv2
+   2: import numpy as np
+   3: import time
+   4: import json
+   5: import statistics
+   6: import os
+   7: from datetime import datetime
+   8: from paths import relativ_sökväg
+   9: 
+  10: # === Inställningar ===
+  11: BLINK_FREKVENS_HZ = 4
+  12: BLINK_INTERVAL = 1 / BLINK_FREKVENS_HZ
+  13: ANTAL_BLINKNINGAR = 20
+  14: MAX_LATENS_MS = 300
+  15: SKÄRM_LATENS_MS = 20
+  16: ROI = (0.45, 0.45, 0.1, 0.1)  # x, y, w, h i procent
+  17: 
+  18: def kör_kalibrering(kamera_index, önskad_fps):
+  19:     cap = cv2.VideoCapture(kamera_index)
+  20:     cap.set(cv2.CAP_PROP_FPS, önskad_fps)
+  21:     if not cap.isOpened():
+  22:         print("❌ Kunde inte öppna kameran.")
+  23:         return
+  24: 
+  25:     fps_mätningar = []
+  26:     latens_mätningar = []
+  27:     missade = 0
+  28:     skärm_tider = []
+  29:     färg = 0
+  30: 
+  31:     cv2.namedWindow("Kalibrering", cv2.WINDOW_NORMAL)
+  32:     cv2.setWindowProperty("Kalibrering", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+  33: 
+  34:     print("🟡 Rikta kameran mot skärmen...")
+  35:     time.sleep(2)
+  36:     print("✅ Startar blinkning...")
+  37: 
+  38:     senaste_blink = time.time()
+  39:     frame_count = 0
+  40:     fps_start = time.time()
+  41:     senaste_färg = färg
+  42:     senaste_skärmtid = senaste_blink
+  43:     registrerade = 0
+  44: 
+  45:     while registrerade < ANTAL_BLINKNINGAR:
+  46:         nu = time.time()
+  47:         if nu - senaste_blink >= BLINK_INTERVAL:
+  48:             färg = 255 if färg == 0 else 0
+  49:             senaste_blink = nu
+  50:             skärm_tider.append(nu)
+  51:             senaste_färg = färg
+  52:             senaste_skärmtid = nu
+  53: 
+  54:         bild = np.full((600, 800, 3), färg, dtype=np.uint8)
+  55: 
+  56:         # Lägg till overlay-text
+  57:         cv2.putText(bild, "Q om du vill avbryta", (10, 580),
+  58:                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+  59: 
+  60:         cv2.imshow("Kalibrering", bild)
+  61: 
+  62: 
+  63:         ret, frame = cap.read()
+  64:         if not ret:
+  65:             continue
+  66: 
+  67:         frame_count += 1
+  68:         if time.time() - fps_start >= 1.0:
+  69:             fps_mätningar.append(frame_count)
+  70:             frame_count = 0
+  71:             fps_start = time.time()
+  72: 
+  73:         h, w, _ = frame.shape
+  74:         x, y, rw, rh = ROI
+  75:         roi = frame[int(y*h):int((y+y*h)*h), int(x*w):int((x+rw)*w)]
+  76:         medelvärde = np.mean(roi)
+  77: 
+  78:         if senaste_färg == 255 and medelvärde > 200:
+  79:             latens = (nu - senaste_skärmtid) * 1000
+  80:             if 0 < latens < MAX_LATENS_MS:
+  81:                 latens_mätningar.append(latens)
+  82:                 registrerade += 1
+  83:                 senaste_färg = 0
+  84:             else:
+  85:                 missade += 1
+  86: 
+  87:         if cv2.waitKey(1) & 0xFF == ord('q'):
+  88:             break
+  89: 
+  90:     cap.release()
+  91:     cv2.destroyAllWindows()
+  92: 
+  93:     medel_latens = round(statistics.mean(latens_mätningar), 2) if latens_mätningar else None
+  94:     std_latens = round(statistics.stdev(latens_mätningar), 2) if len(latens_mätningar) > 1 else 0
+  95:     medel_fps = round(statistics.mean(fps_mätningar), 2) if fps_mätningar else 0
+  96:     std_fps = round(statistics.stdev(fps_mätningar), 2) if len(fps_mätningar) > 1 else 0
+  97: 
+  98:     frame_intervall_ms = 1000 / medel_fps if medel_fps else 0
+  99:     fps_variation_span = round(frame_intervall_ms / 2, 1)
+ 100:     andel_fps_variation = min(1.0, fps_variation_span / std_latens) if std_latens > 0 else 0
+ 101:     procentandel = round(andel_fps_variation * 100)
+ 102: 
+ 103:     justerad_latens = round(medel_latens - SKÄRM_LATENS_MS, 2) if medel_latens else None
+ 104: 
+ 105:     # Skriv ut sammanfattning
+ 106:     print(f"""
+ 107: 📅 Kalibrering klar!
+ 108: 🎥 Kamera: index {kamera_index}
+ 109: 🎯 Begärd FPS: {önskad_fps}
+ 110: 📡 Faktisk FPS: {medel_fps} ± {std_fps}
+ 111: ⚡ Blinkningar: {ANTAL_BLINKNINGAR}, Registrerade: {len(latens_mätningar)}, Missade: {missade}
+ 112: 📈 Latens: {medel_latens} ms ± {std_latens} ms
+ 113: 📉 Uppskattad FPS-bidrag till latensvariation: ~{fps_variation_span} ms (vid {medel_fps} FPS)
+ 114: 📊 Uppskattad andel av latensvariation som kan bero på FPS: ~{procentandel}%
+ 115: 📺 Antagen skärmlatens: {SKÄRM_LATENS_MS} ms
+ 116: 📈 Justerad systemlatens (exkl. skärm): {justerad_latens} ms
+ 117: """)
+ 118: 
+ 119:     # Spara endast relevant data
+ 120:     os.makedirs("data", exist_ok=True)
+ 121:     with open("data/latens_config.json", "w") as f:
+ 122:         json.dump({
+ 123:             "justerad_latens_ms": justerad_latens,
+ 124:             "fps": medel_fps,
+ 125:             "fps_std": std_fps,
+ 126:             "fps_variation_span_ms": fps_variation_span,
+ 127:             "fps_variation_procent": procentandel,
+ 128:             "skärm_latens_ms": SKÄRM_LATENS_MS
+ 129:         }, f, indent=2)
+ 130: 
+ 131:     print("💾 Kalibrering sparad i data/latens_config.json")
+ 132: 
+ 133: # === Direktkörning (valfritt)
+ 134: if __name__ == "__main__":
+ 135:     with open(relativ_sökväg("data", "config.json")) as f:
+ 136:         config = json.load(f)
+ 137: 
+ 138:     kamera_index = config.get("kamera_index")
+ 139:     önskad_fps = config.get("kamera_fps")
+ 140: 
+ 141:     if kamera_index is None or önskad_fps is None:
+ 142:         print("⚠️ Kamera måste väljas först i inställningsmenyn.")
+ 143:     else:
+ 144:         kör_kalibrering(kamera_index, önskad_fps)
+ 145:         print("✅ Kalibrering avslutad.")
+
+
+# --- main.py ---
+
+   1: import os
+   2: from meny import huvudmeny
+   3: 
+   4: # Lista över alla viktiga mappar
+   5: nödvändiga_mappar = [
+   6:     "resultat",
+   7:     "startlistor",
+   8:     "träning",
+   9:     "data"
+  10: ]
+  11: 
+  12: # Skapa dem om de inte finns
+  13: for mapp in nödvändiga_mappar:
+  14:     os.makedirs(mapp, exist_ok=True)
+  15: 
+  16: if __name__ == "__main__":
+  17:     huvudmeny()
+
+
+# --- meny.py ---
+
+   1: from paths import relativ_sökväg
+   2: from tavling import starta_tavlingsläge
+   3: from traning import starta_traningsläge
+   4: from analys_main import starta_analysläge
+   5: from startlista import skapa_startlista
+   6: from redigera_startlista import redigera_startlista
+   7: from installningar_meny import installningsmeny
+   8: from sammanfattning import visa_tidigare_sammanfattning, exportera_hel_tävling
+   9: from textutils import sanera_filnamn, normalisera
+  10: from confighantering import ladda_config, spara_config
+  11: import os
+  12: 
+  13: def visa_jacktime_logga():
+  14:     print(r"""
+  15:       ██╗ █████╗  ██████╗██╗  ██╗████████╗██╗███╗   ███╗███████╗
+  16:       ██║██╔══██╗██╔════╝██║  ██║╚══██╔══╝██║████╗ ████║██╔════╝
+  17:       ██║███████║██║     ███████║   ██║   ██║██╔████╔██║█████╗  
+  18:  ██   ██║██╔══██║██║     ██╔══██║   ██║   ██║██║╚██╔╝██║██╔══╝  
+  19:  ╚█████╔╝██║  ██║╚██████╗██║  ██║   ██║   ██║██║ ╚═╝ ██║███████╗
+  20:   ╚════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚═╝     ╚═╝╚══════╝
+  21:     """)
+  22: 
+  23: def huvudmeny():
+  24:     if not hasattr(huvudmeny, "visad_logga"):
+  25:         visa_jacktime_logga()
+  26:         huvudmeny.visad_logga = True
+  27:     config = ladda_config()
+  28:     print("🐾 Välkommen till JackTime")
+  29:     print("📦 Sparade inställningar:")
+  30:     print(f"Arduino-port: {config.get('arduino_port')}")
+  31:     print(f"Kamera-index: {config.get('kamera_index')}")
+  32:     print(f"FPS: {config.get('kamera_fps')} (verifierad: {config.get('verifierad_fps')})")
+  33:     print(f"Senaste lopp-ID: {config.get('senaste_lopp_id')}\n")
+  34: 
+  35:     while True:
+  36:         print("🚀 Vad vill du göra?")
+  37:         print("1. Starta Tävlingsläge")
+  38:         print("2. Starta Träningsläge")
+  39:         print("3. Starta analysläge")
+  40:         print("4. Skapa startlista")
+  41:         print("5. Redigera startlista")
+  42:         print("6. Visa resultat och sammanfattningar")
+  43:         print("7. Inställningsmeny")
+  44:         print("8. Avsluta")
+  45:         val = input("👉 Välj (1–8): ").strip()
+  46: 
+  47:         if val == "1":
+  48:             starta_tavlingsläge(config)
+  49:             spara_config(config)
+  50: 
+  51:         elif val == "2":
+  52:             starta_traningsläge(config)
+  53:             spara_config(config)
+  54: 
+  55:         elif val == "3":
+  56:             visa_analysmeny()
+  57: 
+  58:         elif val == "4":
+  59:             skapa_startlista()
+  60: 
+  61:         elif val == "5":
+  62:             redigera_startlista()
+  63: 
+  64:         elif val == "6":
+  65:             visa_sammanfattningsmeny()
+  66: 
+  67:         elif val == "7":
+  68:             installningsmeny()
+  69: 
+  70:         elif val == "8":
+  71:             print("👋 Avslutar programmet.")
+  72:             break
+  73: 
+  74:         else:
+  75:             print("❌ Ogiltigt val. Försök igen.\n")
+  76: 
+  77: def visa_analysmeny():
+  78:     from analys_main import starta_analysläge
+  79: 
+  80:     print("\n📊 Vad vill du analysera?")
+  81:     print("1. Tävling")
+  82:     print("2. Träning")
+  83:     val_typ = input("👉 Välj (1–2): ").strip()
+  84: 
+  85:     if val_typ == "1":
+  86:         basmapp = relativ_sökväg("resultat")
+  87:         mappar = [
+  88:             d for d in os.listdir(basmapp)
+  89:             if os.path.isdir(os.path.join(basmapp, d)) and d != "träning"
+  90:         ]
+  91:     elif val_typ == "2":
+  92:         basmapp = relativ_sökväg("träning")
+  93:         mappar = [
+  94:             d for d in os.listdir(basmapp)
+  95:             if os.path.isdir(os.path.join(basmapp, d))
+  96:         ]
+  97:     else:
+  98:         print("❌ Ogiltigt val.")
+  99:         return
+ 100: 
+ 101:     if not mappar:
+ 102:         print("❌ Inga mappar hittades.")
+ 103:         return
+ 104: 
+ 105:     print("\n📁 Tillgängliga mappar:")
+ 106:     for i, namn in enumerate(mappar, 1):
+ 107:         print(f"{i}. {namn}")
+ 108:     val_mapp = input("👉 Välj (nummer): ").strip()
+ 109:     if not val_mapp.isdigit() or not (1 <= int(val_mapp) <= len(mappar)):
+ 110:         print("❌ Ogiltigt val.")
+ 111:         return
+ 112:     vald_mapp = mappar[int(val_mapp) - 1]
+ 113:     full_path = os.path.join(basmapp, vald_mapp)
+ 114: 
+ 115:     videofiler = [f for f in os.listdir(full_path) if f.endswith(".avi")]
+ 116:     if not videofiler:
+ 117:         print("❌ Inga videofiler hittades i mappen.")
+ 118:         return
+ 119: 
+ 120:     loppgrupper = {}
+ 121:     for f in videofiler:
+ 122:         delar = f.replace(".avi", "").split("__")
+ 123:         if len(delar) >= 2:
+ 124:             prefix = "__".join(delar[:2])
+ 125:             loppgrupper.setdefault(prefix, []).append(f)
+ 126: 
+ 127:     if not loppgrupper:
+ 128:         print("❌ Inga giltiga lopp hittades.")
+ 129:         return
+ 130: 
+ 131:     print(f"\n🏁 Lopp i mappen '{vald_mapp}':")
+ 132:     loppnamn_lista = list(loppgrupper.keys())
+ 133:     for i, namn in enumerate(loppnamn_lista, 1):
+ 134:         delar = namn.split("__")
+ 135:         if len(delar) == 2:
+ 136:             lopp_id, lopp_namn = delar
+ 137:         else:
+ 138:             lopp_id = namn
+ 139:             lopp_namn = namn
+ 140:         print(f"{i}. {lopp_namn} ({lopp_id})")
+ 141: 
+ 142:     val_lopp = input("👉 Välj lopp (nummer): ").strip()
+ 143:     if not val_lopp.isdigit() or not (1 <= int(val_lopp) <= len(loppnamn_lista)):
+ 144:         print("❌ Ogiltigt val.")
+ 145:         return
+ 146: 
+ 147:     valt_prefix = loppnamn_lista[int(val_lopp) - 1]
+ 148:     matchande_videor = sorted([
+ 149:         os.path.join(full_path, f) for f in loppgrupper[valt_prefix]
+ 150:     ])
+ 151: 
+ 152:     if not matchande_videor:
+ 153:         print("❌ Inga videor hittades för valt lopp.")
+ 154:         return
+ 155: 
+ 156:     if val_typ == "2":
+ 157:         starta_analysläge(matchande_videor[0], valt_loppnamn=None, tillåt_nästa_lopp=True)
+ 158:     else:
+ 159:         loppnamn = valt_prefix.split("__")[1]
+ 160:         starta_analysläge(matchande_videor[0], sanera_filnamn(loppnamn), tillåt_nästa_lopp=True)
+ 161: 
+ 162: def visa_sammanfattningsmeny():
+ 163:     print("\n📊 Vill du visa sammanfattning för:")
+ 164:     print("1. Tävling")
+ 165:     print("2. Träning")
+ 166:     val_typ = input("👉 Välj (1–2): ").strip()
+ 167: 
+ 168:     if val_typ == "1":
+ 169:         är_träning = False
+ 170:         basmapp = relativ_sökväg("resultat")
+ 171:         mappar = [
+ 172:             d for d in os.listdir(basmapp)
+ 173:             if os.path.isdir(os.path.join(basmapp, d)) and d != "träning"
+ 174:         ]
+ 175:     elif val_typ == "2":
+ 176:         är_träning = True
+ 177:         basmapp = relativ_sökväg("träning")
+ 178:         mappar = [
+ 179:             d for d in os.listdir(basmapp)
+ 180:             if os.path.isdir(os.path.join(basmapp, d))
+ 181:         ]
+ 182:     else:
+ 183:         print("❌ Ogiltigt val.")
+ 184:         return
+ 185: 
+ 186:     if not mappar:
+ 187:         print(f"❌ Inga sparade { 'träningspass' if är_träning else 'tävlingar' } hittades.")
+ 188:         return
+ 189: 
+ 190:     print(f"\n📂 Tillgängliga { 'träningspass' if är_träning else 'tävlingar' }:")
+ 191:     for i, namn in enumerate(mappar, 1):
+ 192:         print(f"  {i}. {namn}")
+ 193: 
+ 194:     val = input("🔢 Välj (nummer): ").strip()
+ 195:     if not val.isdigit() or int(val) < 1 or int(val) > len(mappar):
+ 196:         print("❌ Ogiltigt val.")
+ 197:         return
+ 198: 
+ 199:     vald_mapp = mappar[int(val) - 1]
+ 200:     full_path = os.path.join(basmapp, vald_mapp)
+ 201:     alla_filer = os.listdir(full_path)
+ 202: 
+ 203:     def är_giltig_jsonfil(filnamn):
+ 204:         if not filnamn.endswith(".json"):
+ 205:             return False
+ 206:         if "__analys__" in filnamn or "__frame_tider" in filnamn or "_sammanfattning" in filnamn:
+ 207:             return False
+ 208:         return True
+ 209: 
+ 210:     jsonfiler = [f for f in alla_filer if är_giltig_jsonfil(f)]
+ 211: 
+ 212:     if not är_träning:
+ 213:         avi_basnamn = {os.path.splitext(f)[0] for f in alla_filer if f.endswith(".avi")}
+ 214:         jsonfiler = [
+ 215:             f for f in jsonfiler
+ 216:             if os.path.splitext(f)[0] not in avi_basnamn
+ 217:         ]
+ 218: 
+ 219:     if not jsonfiler:
+ 220:         print("⚠️ Inga sparade lopp hittades i mappen.")
+ 221:         return
+ 222: 
+ 223:     print(f"\n📋 Lopp i '{vald_mapp}':")
+ 224:     for i, fil in enumerate(sorted(jsonfiler), 1):
+ 225:         print(f"  {i}. {os.path.splitext(fil)[0]}")
+ 226:     print(f"  {len(jsonfiler)+1}. Exportera hela { 'träningspasset' if är_träning else 'tävlingen' } till Excel")
+ 227: 
+ 228:     val2 = input("🔢 Välj lopp eller export (nummer): ").strip()
+ 229:     if not val2.isdigit():
+ 230:         print("❌ Ogiltigt val.")
+ 231:         return
+ 232: 
+ 233:     val2 = int(val2)
+ 234:     if val2 == len(jsonfiler) + 1:
+ 235:         exportera_hel_tävling(vald_mapp)
+ 236:     elif 1 <= val2 <= len(jsonfiler):
+ 237:         loppnamn = os.path.splitext(sorted(jsonfiler)[val2 - 1])[0]
+ 238:         visa_tidigare_sammanfattning(vald_mapp, sanera_filnamn(loppnamn), är_träning=är_träning)
+ 239:     else:
+ 240:         print("❌ Ogiltigt val.")
+
+
+# --- metadata.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import json
+   4: import datetime
+   5: from textutils import sanera_filnamn
+   6: 
+   7: def spara_metadata_och_frame_tider(inspelningsinfo, config, start_tid):
+   8:     """
+   9:     Sparar metadata och frame_tider till .json och .csv för en inspelning.
+  10:     """
+  11:     metadata = {
+  12:         "fps": round(config.get("verifierad_fps", 0), 2),
+  13:         "vald_fps": config.get("kamera_fps"),
+  14:         "fördröjning": round(inspelningsinfo["starttid"] - start_tid, 6),
+  15:         "start_tid": datetime.datetime.fromtimestamp(start_tid).isoformat(),
+  16:         "mållinje_x": config.get("mållinje_x"),
+  17:         "kamera_index": config.get("kamera_index"),
+  18:         "lopp_index": inspelningsinfo.get("lopp_index"),
+  19:         "lopp_namn": inspelningsinfo.get("lopp_namn"),
+  20:         "inspelningsnummer": inspelningsinfo.get("inspelningsnummer"),
+  21:         "tidtagning_start": datetime.datetime.fromtimestamp(start_tid).isoformat()
+  22:     }
+  23: 
+  24:     if inspelningsinfo.get("frame_tider"):
+  25:         metadata["frame_tider"] = inspelningsinfo["frame_tider"]
+  26:         csv_fil = inspelningsinfo["fil"].replace(".avi", "_frame_tider.csv")
+  27:         csv_fil = os.path.join(os.path.dirname(csv_fil), f"{sanera_filnamn(os.path.basename(csv_fil))}")
+  28:         with open(csv_fil, "w") as f:
+  29:             for t in inspelningsinfo["frame_tider"]:
+  30:                 f.write(f"{t:.6f}\n")
+  31:         print(f"🧮 Frame-tider sparade: {len(inspelningsinfo['frame_tider'])} st → {os.path.basename(csv_fil)}")
+  32: 
+  33:     metadata_fil = inspelningsinfo["fil"].replace(".avi", ".json")
+  34:     metadata_fil = os.path.join(os.path.dirname(metadata_fil), f"{sanera_filnamn(os.path.basename(metadata_fil))}")
+  35:     with open(metadata_fil, "w", encoding="utf-8") as f:
+  36:         json.dump(metadata, f, indent=2)
+  37:     print(f"📝 Metadata sparad: {os.path.basename(metadata_fil)}")
+
+
+# --- paths.py ---
+
+   1: import os
+   2: 
+   3: # Projektets rotmapp – där main.py ligger
+   4: PROJEKTMAPP = os.path.dirname(os.path.abspath(__file__))
+   5: 
+   6: def relativ_sökväg(*delar):
+   7:     """
+   8:     Returnerar en absolut sökväg baserat på projektets rotmapp.
+   9:     Exempel: relativ_sökväg("träning", "2025-11-01") → /projektmapp/träning/2025-11-01
+  10:     """
+  11:     return os.path.join(PROJEKTMAPP, *delar)
+
+
+# --- redigera_startlista.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import json
+   4: from startlista import mata_in_lopp
+   5: from gemensamt import ladda_startlista
+   6: from textutils import sanera_filnamn, normalisera
+   7: 
+   8: def lista_startlistor():
+   9:     basmapp = relativ_sökväg("startlistor")
+  10:     filer = [f for f in os.listdir(basmapp) if f.endswith(".json")]
+  11:     if not filer:
+  12:         print("❌ Inga startlistor hittades.")
+  13:         return None
+  14:     print("\n📁 Tillgängliga startlistor:")
+  15:     for i, fil in enumerate(filer, start=1):
+  16:         print(f"{i}. {fil}")
+  17:     while True:
+  18:         try:
+  19:             val = int(input("👉 Välj en fil att redigera: "))
+  20:             if 1 <= val <= len(filer):
+  21:                 return relativ_sökväg("startlistor", filer[val - 1])
+  22:         except ValueError:
+  23:             pass
+  24:         print("❌ Ogiltigt val. Försök igen.")
+  25: 
+  26: def visa_lopp(startlista):
+  27:     print("\n📋 Lopp i startlistan:")
+  28:     for i, lopp in enumerate(startlista, start=1):
+  29:         print(f"\n{i}. 🏁 {lopp['lopp_namn']} – 📏 {lopp['distans']} meter")
+  30:         print("   🐶 Startlista:")
+  31:         for snr in range(1, 7):
+  32:             namn = lopp["hundar"].get(str(snr), "")
+  33:             print(f"     {snr}: {namn or '[tom]'}")
+  34: 
+  35: def redigera_lopp(startlista):
+  36:     visa_lopp(startlista)
+  37:     try:
+  38:         val = int(input("✏️ Välj lopp att redigera (nummer): "))
+  39:         if 1 <= val <= len(startlista):
+  40:             nytt_lopp = mata_in_lopp()
+  41:             startlista[val - 1] = nytt_lopp
+  42:             print("✅ Lopp uppdaterat.")
+  43:     except:
+  44:         print("❌ Ogiltigt val.")
+  45: 
+  46: def ta_bort_lopp(startlista):
+  47:     visa_lopp(startlista)
+  48:     try:
+  49:         val = int(input("🗑️ Välj lopp att ta bort (nummer): "))
+  50:         if 1 <= val <= len(startlista):
+  51:             bekräfta = input(f"⚠️ Ta bort '{startlista[val - 1]['lopp_namn']}'? (j/n): ").lower()
+  52:             if bekräfta == "j":
+  53:                 startlista.pop(val - 1)
+  54:                 print("✅ Lopp borttaget.")
+  55:     except:
+  56:         print("❌ Ogiltigt val.")
+  57: 
+  58: def lägg_till_lopp(startlista):
+  59:     nytt_lopp = mata_in_lopp()
+  60:     print("\n📌 Var vill du lägga till loppet?")
+  61:     print("1. Sist")
+  62:     print("2. Före ett annat lopp")
+  63:     val = input("👉 Välj (1–2): ").strip()
+  64:     if val == "1":
+  65:         startlista.append(nytt_lopp)
+  66:         print("✅ Lopp tillagt sist.")
+  67:     elif val == "2":
+  68:         visa_lopp(startlista)
+  69:         try:
+  70:             index = int(input("📍 Lägg till före lopp nummer: "))
+  71:             if 1 <= index <= len(startlista):
+  72:                 startlista.insert(index - 1, nytt_lopp)
+  73:                 print(f"✅ Lopp tillagt före lopp {index}.")
+  74:         except:
+  75:             print("❌ Ogiltigt val.")
+  76: 
+  77: def exportera_startlista(startlista, filväg):
+  78:     filnamn = os.path.basename(filväg).replace(".json", "")
+  79:     export_fil = relativ_sökväg("startlistor", f"{sanera_filnamn(filnamn)}_export.txt")
+  80:     delar = filnamn.split("_", 1)
+  81:     datum = delar[0] if len(delar) > 0 else "Okänt datum"
+  82:     tävling = delar[1].replace("_", " ") if len(delar) > 1 else "Okänt tävling"
+  83: 
+  84:     with open(export_fil, "w", encoding="utf-8") as f:
+  85:         f.write(f"Tävling: {tävling}\n")
+  86:         f.write(f"Datum: {datum}\n")
+  87:         f.write("=" * 40 + "\n\n")
+  88:         for i, lopp in enumerate(startlista, start=1):
+  89:             f.write(f"Lopp {i}: {lopp['lopp_namn']} – {lopp['distans']} meter\n")
+  90:             for snr in range(1, 7):
+  91:                 namn = lopp["hundar"].get(str(snr), "")
+  92:                 f.write(f"  Startnummer {snr}: {namn or '[tom]'}\n")
+  93:             f.write("\n")
+  94:     print(f"\n📝 Export klar: {export_fil}")
+  95: 
+  96: def redigera_startlista():
+  97:     filväg = lista_startlistor()
+  98:     if not filväg:
+  99:         return
+ 100: 
+ 101:     with open(filväg, "r", encoding="utf-8") as f:
+ 102:         startlista = json.load(f)
+ 103: 
+ 104:     while True:
+ 105:         print("\n🛠️ Vad vill du göra?")
+ 106:         print("1. Redigera ett lopp")
+ 107:         print("2. Ta bort ett lopp")
+ 108:         print("3. Lägg till ett nytt lopp")
+ 109:         print("4. Visa alla lopp")
+ 110:         print("5. Exportera till textfil")
+ 111:         print("6. Spara och avsluta")
+ 112:         print("7. Avbryt utan att spara")
+ 113:         val = input("👉 Välj (1–7): ").strip()
+ 114: 
+ 115:         if val == "1":
+ 116:             redigera_lopp(startlista)
+ 117:         elif val == "2":
+ 118:             ta_bort_lopp(startlista)
+ 119:         elif val == "3":
+ 120:             lägg_till_lopp(startlista)
+ 121:         elif val == "4":
+ 122:             visa_lopp(startlista)
+ 123:         elif val == "5":
+ 124:             exportera_startlista(startlista, filväg)
+ 125:         elif val == "6":
+ 126:             with open(filväg, "w", encoding="utf-8") as f:
+ 127:                 json.dump(startlista, f, indent=2, ensure_ascii=False)
+ 128:             print(f"💾 Ändringar sparade till {filväg}")
+ 129:             break
+ 130:         elif val == "7":
+ 131:             print("❌ Inga ändringar sparades.")
+ 132:             break
+ 133:         else:
+ 134:             print("❌ Ogiltigt val.")
+
+
+# --- sammanfattning.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import json
+   4: import datetime
+   5: import pandas as pd
+   6: from textutils import normalisera, sanera_filnamn
+   7: from analys_summary import visa_sammanfattning
+   8: 
+   9: def exportera_startlista(startlista, filväg):
+  10:     filnamn = os.path.basename(filväg).replace(".json", "")
+  11:     delar = filnamn.split("_", 1)
+  12:     datum = delar[0] if len(delar) > 0 else "Okänt datum"
+  13:     tävling = delar[1].replace("_", " ") if len(delar) > 1 else "Okänt tävling"
+  14:     export_fil = os.path.join("startlistor", f"{sanera_filnamn(filnamn)}_export.xlsx")
+  15: 
+  16:     writer = pd.ExcelWriter(export_fil, engine="openpyxl")
+  17: 
+  18:     for i, lopp in enumerate(startlista, start=1):
+  19:         rows = []
+  20:         for snr in range(1, 7):
+  21:             namn = lopp["hundar"].get(str(snr), "")
+  22:             rows.append({
+  23:                 "Startnummer": snr,
+  24:                 "Namn": namn or "[tom]"
+  25:             })
+  26:         df = pd.DataFrame(rows)
+  27:         sheet_namn = f"Lopp_{i}_{lopp['lopp_namn'][:20]}"
+  28:         df.to_excel(writer, sheet_name=sheet_namn[:31], index=False)
+  29: 
+  30:     writer.close()
+  31:     print(f"\n📝 Export klar: {export_fil}")
+  32: 
+  33: def extrahera_sortbar_tid(tider):
+  34:     if isinstance(tider, str) and tider == "DNF":
+  35:         return float('inf')  # Sorteras sist
+  36:     if isinstance(tider, list):
+  37:         giltiga = [
+  38:             t["tid"] if isinstance(t, dict) and "tid" in t else t
+  39:             for t in tider
+  40:             if isinstance(t, (float, int)) or (isinstance(t, dict) and "tid" in t)
+  41:         ]
+  42:         return max(giltiga) if giltiga else float('inf')
+  43:     elif isinstance(tider, dict) and "tid" in tider:
+  44:         return tider["tid"]
+  45:     elif isinstance(tider, (float, int)):
+  46:         return tider
+  47:     return float('inf')
+  48: 
+  49: def formatera_tid(tid):
+  50:     if isinstance(tid, (float, int)):
+  51:         return f"{tid:.3f}"
+  52:     return "DNF"
+  53: 
+  54: def visa_sammanfattning(loppnamn, tider, startlista):
+  55:     print(f"\n📋 Sammanfattning för {loppnamn}:")
+  56:     if not tider:
+  57:         print("⚠️ Inga tider loggade.")
+  58:         return
+  59:     sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
+  60:     for placering, (hundnummer, tid) in enumerate(sorterade, start=1):
+  61:         info = startlista.get(str(hundnummer), {})
+  62:         namn = info.get("namn", f"Hund {hundnummer}")
+  63:         klubb = info.get("klubb", "")
+  64:         if isinstance(tid, list):
+  65:             tid_lista = sorted(tid)
+  66:             splittid = tid_lista[0]
+  67:             måltid = tid_lista[-1]
+  68:         else:
+  69:             splittid = måltid = tid
+  70: 
+  71:         print(f"  {placering}. Hund {hundnummer} ({namn}): Splittid {formatera_tid(splittid)} s, Måltid {formatera_tid(måltid)} s")
+  72: 
+  73: def spara_analysresultat(startlista_namn, loppnamn, tider, metadata, startlista):
+  74:     mapp = relativ_sökväg("resultat", startlista_namn)
+  75:     os.makedirs(mapp, exist_ok=True)
+  76:     tidtagning = datetime.datetime.now().strftime("%H-%M-%S")
+  77:     filnamn = os.path.join(mapp, f"{sanera_filnamn(loppnamn)}__analys__{tidtagning}.json")
+  78: 
+  79:     data = {
+  80:         "lopp": loppnamn,
+  81:         "tider": tider,
+  82:         "metadata": metadata,
+  83:         "startlista": startlista
+  84:     }
+  85: 
+  86:     with open(filnamn, "w", encoding="utf-8") as f:
+  87:         json.dump(data, f, indent=2, ensure_ascii=False)
+  88: 
+  89:     print(f"💾 Analysresultat sparat: {filnamn}")
+  90: 
+  91: def spara_sammanfattning_json(startlista_namn, loppnamn, tider, metadata, startlista):
+  92:     if startlista_namn == "träning":
+  93:         datum = metadata.get("start_tid", "").split("T")[0] or "okänt_datum"
+  94:         mapp = relativ_sökväg("träning", datum)
+  95:     else:
+  96:         mapp = relativ_sökväg("resultat", startlista_namn)
+  97: 
+  98:     os.makedirs(mapp, exist_ok=True)
+  99:     filnamn = os.path.join(mapp, f"{sanera_filnamn(loppnamn)}.json")
+ 100: 
+ 101:     data = {
+ 102:         "tider": tider,
+ 103:         "metadata": metadata,
+ 104:         "startlista": startlista
+ 105:     }
+ 106: 
+ 107:     with open(filnamn, "w", encoding="utf-8") as f:
+ 108:         json.dump(data, f, indent=2, ensure_ascii=False)
+ 109: 
+ 110:     print(f"💾 Sammanfattning sparad: {filnamn}")
+ 111: 
+ 112: def fråga_om_export(startlista_namn, loppnamn, tider, startlista):
+ 113:     svar = input("📤 Vill du exportera sammanfattningen till en Excel-fil? (j/n): ").strip().lower()
+ 114:     if svar == "j":
+ 115:         exportera_till_excel(startlista_namn, loppnamn, tider, startlista)
+ 116: 
+ 117: def exportera_till_excel(startlista_namn, loppnamn, tider, startlista):
+ 118:     if startlista_namn == "träning":
+ 119:         datum = datetime.date.today().isoformat()
+ 120:         mapp = relativ_sökväg("träning", datum)
+ 121:     else:
+ 122:         mapp = relativ_sökväg("resultat", startlista_namn)
+ 123: 
+ 124:     os.makedirs(mapp, exist_ok=True)
+ 125:     filnamn = os.path.join(mapp, f"{sanera_filnamn(loppnamn)}_sammanfattning.xlsx")
+ 126: 
+ 127:     def sort_nyckel(item):
+ 128:         tid = item[1]
+ 129:         return min(tid) if isinstance(tid, list) else tid
+ 130: 
+ 131:     sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
+ 132:     data = []
+ 133: 
+ 134:     for placering, (hundnummer, tid) in enumerate(sorterade, start=1):
+ 135:         info = startlista.get(str(hundnummer), {})
+ 136:         namn = info.get("namn", f"Hund {hundnummer}")
+ 137: 
+ 138:         if isinstance(tid, list):
+ 139:             tid_lista = sorted(tid)
+ 140:             splittid = tid_lista[0]
+ 141:             måltid = tid_lista[-1]
+ 142:         else:
+ 143:             splittid = måltid = tid
+ 144: 
+ 145:         data.append({
+ 146:             "Plats": placering,
+ 147:             "Startnummer": hundnummer,
+ 148:             "Namn": namn,
+ 149:             "Splittid (s)": formatera_tid(splittid),
+ 150:             "Måltid (s)": formatera_tid(måltid)
+ 151:         })
+ 152: 
+ 153:     df = pd.DataFrame(data)
+ 154:     df.to_excel(filnamn, index=False)
+ 155:     print(f"📊 Excel-fil skapad: {filnamn}")
+ 156: 
+ 157: def visa_tidigare_sammanfattning(datum, loppnamn, startlista=None, är_träning=False):
+ 158:     """
+ 159:     Visar sammanfattning för ett tidigare lopp, från tävling eller träning.
+ 160:     """
+ 161: 
+ 162:     # Välj rätt mapp beroende på typ
+ 163:     mapptyp = "träning" if är_träning else "resultat"
+ 164:     sökväg = relativ_sökväg(mapptyp, datum, f"{sanera_filnamn(loppnamn)}.json")
+ 165: 
+ 166:     if not os.path.exists(sökväg):
+ 167:         print(f"❌ Ingen sparad sammanfattning hittades: {sökväg}")
+ 168:         return
+ 169: 
+ 170:     try:
+ 171:         with open(sökväg, "r", encoding="utf-8") as f:
+ 172:             filinnehåll = json.load(f)
+ 173:     except json.JSONDecodeError:
+ 174:         print(f"❌ Ogiltigt JSON-format i: {sökväg}")
+ 175:         return
+ 176: 
+ 177:     # Hämta tider från "tider"-nyckeln om den finns
+ 178:     loggade_tider = filinnehåll.get("tider")
+ 179:     if not loggade_tider:
+ 180:         # fallback: plocka ut alla nycklar som ser ut som hundnummer
+ 181:         loggade_tider = {
+ 182:             k: v for k, v in filinnehåll.items()
+ 183:             if k.isdigit() and isinstance(v, list)
+ 184:         }
+ 185: 
+ 186:     # Hämta eller skapa startlista
+ 187:     startlista = startlista or filinnehåll.get("startlista", {})
+ 188:     if not startlista:
+ 189:         hundnummer = sorted(loggade_tider.keys(), key=lambda x: int(x))
+ 190:         startlista = {
+ 191:             str(nr): {"namn": f"Hund {nr}", "klubb": ""}
+ 192:             for nr in hundnummer
+ 193:         }
+ 194: 
+ 195:     print(f"\n📋 Sammanfattning från fil: {sökväg}")
+ 196:     visa_sammanfattning(loppnamn, loggade_tider, startlista or {})
+ 197: 
+ 198: def exportera_hel_tävling(startlista_namn):
+ 199:     import pandas as pd
+ 200: 
+ 201:     träningsmapp = relativ_sökväg("träning", startlista_namn)
+ 202:     tävlingsmapp = relativ_sökväg("resultat", startlista_namn)
+ 203: 
+ 204:     if os.path.exists(träningsmapp):
+ 205:         mapp = träningsmapp
+ 206:         typ = "Träningspass"
+ 207:     elif os.path.exists(tävlingsmapp):
+ 208:         mapp = tävlingsmapp
+ 209:         typ = "Tävling"
+ 210:     else:
+ 211:         print(f"❌ Ingen resultatmapp hittades för '{startlista_namn}'")
+ 212:         return
+ 213: 
+ 214:     alla_filer = os.listdir(mapp)
+ 215:     jsonfiler = [
+ 216:         f for f in alla_filer
+ 217:         if f.endswith(".json")
+ 218:         and not f.endswith("_sammanfattning.json")
+ 219:         and "__analys__" not in f
+ 220:         and "__frame_tider" not in f
+ 221:     ]
+ 222: 
+ 223:     if not jsonfiler:
+ 224:         print("❌ Inga resultatfiler hittades.")
+ 225:         return
+ 226: 
+ 227:     filnamn = relativ_sökväg(mapp, f"{sanera_filnamn(startlista_namn)}_sammanfattning.xlsx")
+ 228:     writer = pd.ExcelWriter(filnamn, engine="openpyxl")
+ 229: 
+ 230:     alla_rader = []
+ 231:     alla_rader.append([f"{typ}: {startlista_namn}"])
+ 232:     alla_rader.append([])
+ 233: 
+ 234:     for fil in sorted(jsonfiler):
+ 235:         loppnamn = os.path.splitext(fil)[0]
+ 236:         fullpath = os.path.join(mapp, fil)
+ 237:         with open(fullpath, "r", encoding="utf-8") as datafil:
+ 238:             data = json.load(datafil)
+ 239: 
+ 240:         tider = data.get("tider", {})
+ 241:         if not tider:
+ 242:             continue
+ 243: 
+ 244:         startlista = data.get("startlista", {
+ 245:             str(nr): {"namn": f"Hund {nr}"} for nr in tider.keys()
+ 246:         })
+ 247: 
+ 248:         def sort_nyckel(item):
+ 249:             tid = item[1]
+ 250:             return min(tid) if isinstance(tid, list) else tid
+ 251: 
+ 252:         sorterade = sorted(tider.items(), key=lambda x: extrahera_sortbar_tid(x[1]))
+ 253: 
+ 254:         alla_rader.append([f"Lopp: {loppnamn}"])
+ 255:         alla_rader.append(["Plats", "Startnummer", "Namn", "Splittid (s)", "Måltid (s)"])
+ 256: 
+ 257:         for placering, (hundnummer, tid) in enumerate(sorterade, start=1):
+ 258:             info = startlista.get(str(hundnummer), {})
+ 259:             namn = info.get("namn", f"Hund {hundnummer}")
+ 260:             if isinstance(tid, list):
+ 261:                 tid_lista = sorted(tid)
+ 262:                 splittid = tid_lista[0]
+ 263:                 måltid = tid_lista[-1]
+ 264:             else:
+ 265:                 splittid = måltid = tid
+ 266:             alla_rader.append([
+ 267:                 placering,
+ 268:                 hundnummer,
+ 269:                 namn,
+ 270:                 formatera_tid(splittid),
+ 271:                 formatera_tid(måltid)
+ 272: 
+ 273:             ])
+ 274: 
+ 275:         alla_rader.append([])
+ 276: 
+ 277:     df = pd.DataFrame(alla_rader)
+ 278:     df.to_excel(writer, sheet_name="Sammanfattning", index=False, header=False)
+ 279:     writer.close()
+ 280:     print(f"📄 Sammanfattning för hela {typ.lower()} sparad: {filnamn}")
+
+
+# --- startlista.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import json
+   4: from textutils import sanera_filnamn
+   5: 
+   6: def välj_månad():
+   7:     månader = [
+   8:         "Januari", "Februari", "Mars", "April", "Maj", "Juni",
+   9:         "Juli", "Augusti", "September", "Oktober", "November", "December"
+  10:     ]
+  11:     print("\n📅 Välj månad:")
+  12:     for i, månad in enumerate(månader, start=1):
+  13:         print(f"{i}. {månad}")
+  14:     while True:
+  15:         try:
+  16:             val = int(input("👉 Nummer (1–12): "))
+  17:             if 1 <= val <= 12:
+  18:                 return val, månader[val - 1]
+  19:         except ValueError:
+  20:             pass
+  21:         print("❌ Ogiltigt val. Försök igen.")
+  22: 
+  23: def mata_in_lopp():
+  24:     while True:
+  25:         lopp_namn = input("\n🏁 Loppets namn: ").strip()
+  26:         distans = input("📏 Distans i meter: ").strip()
+  27:         hundar = {}
+  28: 
+  29:         print("🐶 Ange namn på hundar (startnummer 1–6):")
+  30:         for i in range(1, 7):
+  31:             namn = input(f"  Startnummer {i}: ").strip()
+  32:             if namn:
+  33:                 hundar[str(i)] = namn
+  34: 
+  35:         print("\n📋 Sammanställning:")
+  36:         print(f"Lopp: {lopp_namn}")
+  37:         print(f"Distans: {distans} meter")
+  38:         for i in range(1, 7):
+  39:             print(f"  {i}: {hundar.get(str(i), '[tom]')}")
+  40: 
+  41:         korrekt = input("\n✅ Är detta korrekt? (j/n): ").strip().lower()
+  42:         if korrekt == "j":
+  43:             return {
+  44:                 "lopp_namn": lopp_namn,
+  45:                 "distans": int(distans) if distans.isdigit() else distans,
+  46:                 "hundar": hundar
+  47:             }
+  48:         else:
+  49:             print("🔄 Mata in loppet igen.")
+  50: 
+  51: def skapa_startlista():
+  52:     print("\n🆕 Skapa startlista")
+  53: 
+  54:     år = input("📆 Ange år (t.ex. 2025): ").strip()
+  55:     månad_nummer, månad_namn = välj_månad()
+  56:     dag = input("📆 Ange dag i månaden (t.ex. 11): ").strip()
+  57: 
+  58:     namn = input("🏁 Vad vill du kalla tävlingen?: ").strip()
+  59:     namn_sanitiserat = sanera_filnamn(namn)
+  60: 
+  61:     filnamn = f"{år}-{månad_nummer:02d}-{dag}_{namn_sanitiserat}.json"
+  62:     filväg = relativ_sökväg("startlistor", filnamn)
+  63:     os.makedirs(os.path.dirname(filväg), exist_ok=True)
+  64: 
+  65:     print(f"\n📁 Startlista kommer sparas som: {filväg}")
+  66: 
+  67:     startlista = []
+  68:     while True:
+  69:         lopp = mata_in_lopp()
+  70:         startlista.append(lopp)
+  71:         fler = input("\n➕ Vill du lägga till ett lopp till? (j/n): ").strip().lower()
+  72:         if fler != "j":
+  73:             break
+  74: 
+  75:     with open(filväg, "w", encoding="utf-8") as f:
+  76:         json.dump(startlista, f, indent=2, ensure_ascii=False)
+  77: 
+  78:     print(f"\n✅ Startlista sparad: {filväg}")
+
+
+# --- startsensor.py ---
+
+   1: import serial
+   2: import time
+   3: import threading
+   4: import platform
+   5: 
+   6: if platform.system() == "Windows":
+   7:     import msvcrt
+   8: else:
+   9:     import sys
+  10:     import select
+  11: 
+  12: def vänta_på_startsignal(arduino_port):
+  13:     """
+  14:     Väntar på startsignal från Arduino eller tryck på Enter.
+  15:     ESC avbryter och återgår till huvudmenyn.
+  16:     """
+  17:     starttid = [None]
+  18:     avbruten = [False]
+  19: 
+  20:     def lyssna_arduino():
+  21:         try:
+  22:             ser = serial.Serial(arduino_port, 9600, timeout=0.01)
+  23:             while starttid[0] is None and not avbruten[0]:
+  24:                 rad = ser.readline().decode(errors="ignore").strip()
+  25:                 if "start" in rad.lower():
+  26:                     starttid[0] = time.time()
+  27:                     print("✅ Startsignal från Arduino!")
+  28:                     break
+  29:         except serial.SerialException:
+  30:             print("⚠️ Kunde inte öppna Arduino-porten.")
+  31: 
+  32:     def lyssna_tangentbord():
+  33:         if platform.system() == "Windows":
+  34:             print("🟡 Tryck [Enter] för manuell start eller [ESC] för att avbryta...")
+  35:             while starttid[0] is None and not avbruten[0]:
+  36:                 if msvcrt.kbhit():
+  37:                     key = msvcrt.getch()
+  38:                     if key in [b'\r', b'\n']:
+  39:                         starttid[0] = time.time()
+  40:                         print("✅ Startsignal manuellt via tangentbord.")
+  41:                         break
+  42:                     elif key == b'\x1b':  # ESC
+  43:                         avbruten[0] = True
+  44:                         print("↩️ Avbrutet – återgår till huvudmenyn.")
+  45:                         break
+  46:         else:
+  47:             print("🟡 Tryck [Enter] för manuell start eller [ESC] + [Enter] för att avbryta...")
+  48:             while starttid[0] is None and not avbruten[0]:
+  49:                 i, _, _ = select.select([sys.stdin], [], [], 0.1)
+  50:                 if i:
+  51:                     rad = sys.stdin.readline().strip().lower()
+  52:                     if rad == "":
+  53:                         starttid[0] = time.time()
+  54:                         print("✅ Startsignal manuellt via tangentbord.")
+  55:                         break
+  56:                     elif rad == "esc":
+  57:                         avbruten[0] = True
+  58:                         print("↩️ Avbrutet – återgår till huvudmenyn.")
+  59:                         break
+  60: 
+  61:     # Starta båda lyssnarna parallellt
+  62:     tråd_arduino = threading.Thread(target=lyssna_arduino, daemon=True)
+  63:     tråd_tangent = threading.Thread(target=lyssna_tangentbord, daemon=True)
+  64:     tråd_arduino.start()
+  65:     tråd_tangent.start()
+  66: 
+  67:     # Vänta tills något händer
+  68:     while starttid[0] is None and not avbruten[0]:
+  69:         time.sleep(0.001)
+  70: 
+  71:     if avbruten[0]:
+  72:         return None
+  73:     return starttid[0]
+
+
+# --- tavling.py ---
+
+   1: import os
+   2: import datetime
+   3: from tidtagning_core import förbered_kamera_och_mållinje
+   4: from startsensor import vänta_på_startsignal
+   5: from inspelning import kör_inspelningsloop
+   6: from metadata import spara_metadata_och_frame_tider
+   7: from analys_main import starta_analysläge
+   8: from gemensamt import ladda_startlista
+   9: from textutils import sanera_filnamn
+  10: 
+  11: def välj_startlista():
+  12:     filer = [f for f in os.listdir("startlistor") if f.endswith(".json")]
+  13:     if not filer:
+  14:         print("❌ Inga startlistor hittades.")
+  15:         return None
+  16:     print("\n📁 Tillgängliga startlistor:")
+  17:     for i, fil in enumerate(filer, 1):
+  18:         print(f"{i}. {fil}")
+  19:     val = input("👉 Välj startlista (nummer): ").strip()
+  20:     if not val.isdigit() or not (1 <= int(val) <= len(filer)):
+  21:         print("❌ Ogiltigt val.")
+  22:         return None
+  23:     return os.path.splitext(filer[int(val) - 1])[0]
+  24: 
+  25: def välj_lopp(startlista):
+  26:     print("\n🏁 Tillgängliga lopp:")
+  27:     for i, lopp in enumerate(startlista, 1):
+  28:         print(f"{i}. {lopp['lopp_namn']} ({len(lopp['hundar'])} hundar)")
+  29:     val = input("👉 Välj lopp (nummer): ").strip()
+  30:     if not val.isdigit() or not (1 <= int(val) <= len(startlista)):
+  31:         print("❌ Ogiltigt val.")
+  32:         return None, None
+  33:     index = int(val) - 1
+  34:     return startlista[index], index
+  35: 
+  36: def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_index=None, hoppa_fortsättningsfråga=False):
+  37:     print("\n🏁 Startar tävlingsläge...")
+  38: 
+  39:     if not startlista_namn:
+  40:         startlista_namn = välj_startlista()
+  41:         if not startlista_namn:
+  42:             return
+  43: 
+  44:     if not startlista:
+  45:         startlista = ladda_startlista(startlista_namn)
+  46:         if not startlista:
+  47:             print("❌ Startlistan är tom eller ogiltig.")
+  48:             return
+  49: 
+  50:     if lopp_index is None:
+  51:         valt_lopp, lopp_index = välj_lopp(startlista)
+  52:         if not valt_lopp:
+  53:             return
+  54:     else:
+  55:         valt_lopp = startlista[lopp_index]
+  56: 
+  57:     spara_mapp = os.path.join("resultat", sanera_filnamn(startlista_namn))
+  58:     if os.path.isfile(spara_mapp):
+  59:         print(f"⚠️ En fil med namnet '{spara_mapp}' blockerar sparning. Ta bort den först.")
+  60:         return
+  61:     os.makedirs(spara_mapp, exist_ok=True)
+  62: 
+  63:     cap, metadata = förbered_kamera_och_mållinje(config)
+  64:     config["mållinje_x"] = metadata.get("mållinje_x")
+  65:     config["skärmstorlek"] = metadata.get("skärmstorlek")
+  66: 
+  67:     input("\n⏳ Tryck [enter] när du är redo att ta emot startsignal...")
+  68:     start_tid = vänta_på_startsignal(config["arduino_port"])
+  69:     if start_tid is None:
+  70:         print("↩️ Tidtagning avbruten – återgår till huvudmenyn.")
+  71:         return
+  72: 
+  73:     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
+  74:     loppnamn_rensad = sanera_filnamn(valt_lopp["lopp_namn"])
+  75:     filnamnsbas = f"Lopp-{lopp_index+1}__{loppnamn_rensad}__{tidtagning_str}"
+  76:     inspelningar = kör_inspelningsloop(cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"])
+  77: 
+  78:     for insp in inspelningar:
+  79:         insp["lopp_index"] = lopp_index + 1
+  80:         insp["lopp_namn"] = valt_lopp["lopp_namn"]
+  81:         spara_metadata_och_frame_tider(insp, config, start_tid)
+  82: 
+  83:     svar = input("\n🔍 Vill du analysera det här loppet direkt? (j/n): ").strip().lower()
+  84:     if svar == "j":
+  85:         senaste_video = inspelningar[-1]["fil"]
+  86:         starta_analysläge(
+  87:             videofil=senaste_video,
+  88:             valt_loppnamn=valt_lopp["lopp_namn"],
+  89:             tillåt_nästa_lopp=True,
+  90:             startlista_namn=startlista_namn,
+  91:             startlista=startlista,
+  92:             lopp_index=lopp_index
+  93:         )
+  94: 
+  95:     if not hoppa_fortsättningsfråga:
+  96:         svar2 = input("\n⏭️ Vill du ta tid i nästa lopp? (j/n): ").strip().lower()
+  97:         if svar2 == "j" and lopp_index + 1 < len(startlista):
+  98:             config["senaste_lopp_id"] = lopp_index + 2
+  99:             nästa_lopp = startlista[lopp_index + 1]
+ 100:             print(f"\n⏱️ Nästa lopp: {nästa_lopp['lopp_namn']}")
+ 101:             starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1)
+ 102:         else:
+ 103:             print("🏁 Tävlingspass avslutat.")
+ 104: 
+
+
+# --- textutils.py ---
+
+   1: import unicodedata
+   2: 
+   3: def sanera_filnamn(text):
+   4:     text = unicodedata.normalize("NFKD", text)
+   5:     return "".join(c for c in text if c.isalnum() or c in "_-. ").strip()
+   6: 
+   7: def normalisera(text):
+   8:     return unicodedata.normalize("NFKD", text).casefold()
+   9: 
+  10: def ersätt_svenska_tecken(text):
+  11:     return text.replace("å", "a").replace("ä", "a").replace("ö", "o") \
+  12:                .replace("Å", "A").replace("Ä", "A").replace("Ö", "O")
+
+
+# --- tidtagning_core.py ---
+
+   1: import cv2
+   2: import platform
+   3: import tkinter as tk
+   4: from textutils import ersätt_svenska_tecken
+   5: 
+   6: def hämta_skärmstorlek():
+   7:     root = tk.Tk()
+   8:     root.withdraw()
+   9:     return root.winfo_screenwidth(), root.winfo_screenheight()
+  10: 
+  11: def rita_overlay(frame, mållinje_x=None, tid_str=None):
+  12:     höjd, bredd = frame.shape[:2]
+  13:     x = mållinje_x if mållinje_x is not None else bredd // 2
+  14:     cv2.line(frame, (x, 0), (x, höjd), (0, 0, 255), 2)
+  15:     if tid_str:
+  16:         tid_str = ersätt_svenska_tecken(tid_str)
+  17:         cv2.putText(frame, tid_str, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+  18:     return frame
+  19: 
+  20: def förbered_kamera_och_mållinje(config):
+  21:     mållinje_x = None
+  22:     if platform.system() == "Windows":
+  23:         cap = cv2.VideoCapture(config["kamera_index"], cv2.CAP_DSHOW)
+  24:     else:
+  25:         cap = cv2.VideoCapture(config["kamera_index"])
+  26:     cap.set(cv2.CAP_PROP_FPS, config["kamera_fps"])
+  27: 
+  28:     if not cap.isOpened():
+  29:         print("❌ Kunde inte öppna kameran.")
+  30:         return None, {}
+  31: 
+  32:     verifierad_fps = cap.get(cv2.CAP_PROP_FPS)
+  33:     config["verifierad_fps"] = verifierad_fps
+  34: 
+  35:     höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+  36:     bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+  37: 
+  38:     screen_width, screen_height = hämta_skärmstorlek()
+  39:     fönster_bredd = screen_width // 2
+  40:     fönster_höjd = screen_height // 2
+  41:     x_pos = screen_width // 2
+  42:     y_pos = 0
+  43: 
+  44:     def sätt_mållinje(event, x, y, flags, param):
+  45:         nonlocal mållinje_x
+  46:         if event == cv2.EVENT_LBUTTONDOWN:
+  47:             mållinje_x = int(x)
+  48:             print(f"📍 Ny mållinje satt vid x = {mållinje_x}")
+  49: 
+  50:     cv2.namedWindow("Förhandsvisning", cv2.WINDOW_NORMAL)
+  51:     cv2.resizeWindow("Förhandsvisning", fönster_bredd, fönster_höjd)
+  52:     cv2.moveWindow("Förhandsvisning", x_pos, y_pos)
+  53: 
+  54:     callback_satt = False
+  55: 
+  56:     while True:
+  57:         ret, frame = cap.read()
+  58:         if not ret:
+  59:             print("❌ Kunde inte läsa från kameran.")
+  60:             break
+  61: 
+  62:         if not callback_satt:
+  63:             try:
+  64:                 if cv2.getWindowProperty("Förhandsvisning", cv2.WND_PROP_VISIBLE) >= 1:
+  65:                     cv2.setMouseCallback("Förhandsvisning", sätt_mållinje)
+  66:                     callback_satt = True
+  67:             except cv2.error:
+  68:                 pass
+  69: 
+  70:         visning = rita_overlay(frame, mållinje_x)
+  71:         cv2.imshow("Förhandsvisning", visning)
+  72:         tangent = cv2.waitKey(1) & 0xFF
+  73:         if tangent == ord('a'):
+  74:             mållinje_x = max(0, (mållinje_x or bredd // 2) - 10)
+  75:         elif tangent == ord('d'):
+  76:             mållinje_x = min(bredd, (mållinje_x or bredd // 2) + 10)
+  77:         elif tangent == ord('q'):
+  78:             break
+  79: 
+  80:     if mållinje_x is None:
+  81:         mållinje_x = bredd // 2
+  82: 
+  83:     cv2.destroyAllWindows()
+  84: 
+  85:     metadata = {
+  86:         "mållinje_x": mållinje_x,
+  87:         "skärmstorlek": (screen_width, screen_height),
+  88:         "kamera_index": config["kamera_index"],
+  89:         "fps": verifierad_fps
+  90:     }
+  91: 
+  92:     return cap, metadata
+  93: 
+
+
+# --- traning.py ---
+
+   1: from paths import relativ_sökväg
+   2: import os
+   3: import datetime
+   4: from tidtagning_core import förbered_kamera_och_mållinje
+   5: from startsensor import vänta_på_startsignal
+   6: from inspelning import kör_inspelningsloop
+   7: from metadata import spara_metadata_och_frame_tider
+   8: from analys_main import starta_analysläge
+   9: from textutils import sanera_filnamn
+  10: 
+  11: def skapa_traningsmapp():
+  12:     basmapp = relativ_sökväg("träning")
+  13:     os.makedirs(basmapp, exist_ok=True)
+  14:     datum = datetime.date.today().isoformat()
+  15:     dagens_mapp = os.path.join(basmapp, datum)
+  16:     if os.path.isfile(dagens_mapp):
+  17:         print(f"⚠️ En fil med namnet '{dagens_mapp}' blockerar sparning. Ta bort den först.")
+  18:         return None
+  19:     os.makedirs(dagens_mapp, exist_ok=True)
+  20:     return dagens_mapp
+  21: 
+  22: def starta_traningsläge(config):
+  23:     print("\n🏋️‍♂️ Startar träningsläge...")
+  24:     spara_mapp = skapa_traningsmapp()
+  25:     if not spara_mapp:
+  26:         return
+  27: 
+  28:     cap, metadata = förbered_kamera_och_mållinje(config)
+  29:     config["mållinje_x"] = metadata.get("mållinje_x")
+  30:     config["skärmstorlek"] = metadata.get("skärmstorlek")
+  31: 
+  32:     input("\n⏳ Tryck [enter] när du är redo att ta emot startsignal...")
+  33:     start_tid = vänta_på_startsignal(config["arduino_port"])
+  34:     if start_tid is None:
+  35:         print("↩️ Tidtagning avbruten – återgår till huvudmenyn.")
+  36:         return
+  37: 
+  38:     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
+  39:     filnamnsbas = sanera_filnamn(tidtagning_str)
+  40:     inspelningar = kör_inspelningsloop(cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"])
+  41: 
+  42:     for insp in inspelningar:
+  43:         spara_metadata_och_frame_tider(insp, config, start_tid)
+  44: 
+  45:     svar = input("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ").strip().lower()
+  46:     if svar == "j":
+  47:         senaste_video = inspelningar[-1]["fil"]
+  48:         starta_analysläge(senaste_video, valt_loppnamn=None, tillåt_nästa_lopp=False)
+  49: 
+  50:     svar2 = input("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ").strip().lower()
+  51:     if svar2 == "j":
+  52:         starta_traningsläge(config)
+  53:     else:
+  54:         print("🏁 Träningspass avslutat.")
+
+
+# --- video.py ---
+
+   1: import cv2
+   2: import threading
+   3: import platform
+   4: 
+   5: from textutils import sanera_filnamn
+   6: 
+   7: # Globalt inspelningsobjekt
+   8: _inspelningsobjekt = {
+   9:     "capture": None,
+  10:     "writer": None,
+  11:     "aktiv": False,
+  12:     "tråd": None
+  13: }
+  14: 
+  15: def start_inspelning(kamera_index, filnamn, fps=30, upplösning=(1280, 720)):
+  16:     """
+  17:     Startar videoinspelning från vald kamera till angiven fil.
+  18:     Körs i separat tråd.
+  19:     """
+  20:     filnamn = sanera_filnamn(filnamn)
+  21:     
+  22:     if _inspelningsobjekt["aktiv"]:
+  23:         print("⚠️ Inspelning redan aktiv.")
+  24:         return
+  25: 
+  26:     if platform.system() == "Windows":
+  27:         cap = cv2.VideoCapture(kamera_index, cv2.CAP_DSHOW)
+  28:     else:
+  29:         cap = cv2.VideoCapture(kamera_index)
+  30:     if not cap.isOpened():
+  31:         print(f"❌ Kunde inte öppna kamera {kamera_index}.")
+  32:         return
+  33: 
+  34:     cap.set(cv2.CAP_PROP_FRAME_WIDTH, upplösning[0])
+  35:     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, upplösning[1])
+  36:     cap.set(cv2.CAP_PROP_FPS, fps)
+  37: 
+  38:     # Välj codec – H.264 om möjligt, annars MJPEG
+  39:     fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
+  40:     writer = cv2.VideoWriter(filnamn, fourcc, fps, upplösning)
+  41:     if not writer.isOpened():
+  42:         print("⚠️ H.264 misslyckades – försöker MJPEG.")
+  43:         fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+  44:         writer = cv2.VideoWriter(filnamn, fourcc, fps, upplösning)
+  45: 
+  46:     if not writer.isOpened():
+  47:         print("❌ Kunde inte skapa videofil.")
+  48:         cap.release()
+  49:         return
+  50: 
+  51:     _inspelningsobjekt["capture"] = cap
+  52:     _inspelningsobjekt["writer"] = writer
+  53:     _inspelningsobjekt["aktiv"] = True
+  54: 
+  55:     def inspelningsloop():
+  56:         while _inspelningsobjekt["aktiv"]:
+  57:             ret, frame = cap.read()
+  58:             if ret:
+  59:                 writer.write(frame)
+  60: 
+  61:     tråd = threading.Thread(target=inspelningsloop)
+  62:     tråd.start()
+  63:     _inspelningsobjekt["tråd"] = tråd
+  64:     print(f"📹 Inspelning startad: {filnamn}")
+  65: 
+  66: def stoppa_inspelning():
+  67:     """
+  68:     Stoppar videoinspelning och frigör resurser.
+  69:     """
+  70:     if not _inspelningsobjekt["aktiv"]:
+  71:         print("⚠️ Ingen inspelning att stoppa.")
+  72:         return
+  73: 
+  74:     _inspelningsobjekt["aktiv"] = False
+  75:     _inspelningsobjekt["tråd"].join()
+  76: 
+  77:     _inspelningsobjekt["capture"].release()
+  78:     _inspelningsobjekt["writer"].release()
+  79: 
+  80:     _inspelningsobjekt["capture"] = None
+  81:     _inspelningsobjekt["writer"] = None
+  82:     _inspelningsobjekt["tråd"] = None
+  83: 
+  84:     print("🛑 Inspelning stoppad.")
+
+
+# --- Summering ---
+
+analys_loader.py                  81 rader
+analys_logger.py                 133 rader
+analys_main.py                   131 rader
+analys_overlay.py                 22 rader
+analys_summary.py                 47 rader
+arduino.py                        40 rader
+confighantering.py                31 rader
+exportera_excel.py                 9 rader
+gemensamt.py                      39 rader
+inspelning.py                     84 rader
+installningar_meny.py            136 rader
+inställningar.py                 194 rader
+kalibrera_kamera.py              145 rader
+main.py                           17 rader
+meny.py                          240 rader
+metadata.py                       37 rader
+paths.py                          11 rader
+redigera_startlista.py           134 rader
+sammanfattning.py                280 rader
+startlista.py                     78 rader
+startsensor.py                    73 rader
+tavling.py                       104 rader
+textutils.py                      12 rader
+tidtagning_core.py                93 rader
+traning.py                        54 rader
+video.py                          84 rader
