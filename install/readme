@@ -7,6 +7,10 @@ source ../venv/bin/activate
 om du behöver inaktivera den virituela miljön kör:
 deactivate
 
+man kan va tvungen att ge sig själv behörighet att använda usb portar
+sudo usermod -aG uucp $USER
+sudo usermod -aG lock $USER
+
 
 copilots readme
 
