@@ -47,13 +47,13 @@ def installningsmeny():
 def andra_kamera(config):
     print("\n🎥 Väljer ny kamera och FPS...")
     tillgängliga = []
-    for i in range(5):
+    for i in range(10):  # testa fler index om du vill
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
-            tillgängliga.append((i, w, h, fps))
+            tillgängliga.append({"index": i, "w": w, "h": h, "fps": fps})
             cap.release()
 
     if not tillgängliga:
@@ -61,13 +61,13 @@ def andra_kamera(config):
         return
 
     print("\n📋 Tillgängliga kameror:")
-    for i, (index, w, h, fps) in enumerate(tillgängliga, start=1):
-        print(f"{i}. Index {index} – {w}x{h} @ {int(fps)} FPS")
+    for i, cam in enumerate(tillgängliga, start=1):
+        print(f"{i}. Index {cam['index']} – {cam['w']}x{cam['h']} @ {int(cam['fps'])} FPS")
 
     while True:
         val = input("👉 Välj kamera (nummer): ").strip()
         if val.isdigit() and 1 <= int(val) <= len(tillgängliga):
-            valt_index = tillgängliga[int(val) - 1][0]
+            valt_index = tillgängliga[int(val) - 1]["index"]
             break
         print("❌ Ogiltigt val.")
 

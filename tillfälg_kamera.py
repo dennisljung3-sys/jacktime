@@ -1,6 +1,6 @@
 import cv2
 
-cap = cv2.VideoCapture(0)  # prova även 1 om 0 inte funkar
+cap = cv2.VideoCapture(2)  # prova även 1 om 0 inte funkar
 if not cap.isOpened():
     print("❌ Kunde inte öppna kameran")
 else:

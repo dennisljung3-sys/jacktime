@@ -21,7 +21,7 @@ def samla_kod_med_rader(källmapp, utfil):
             ut.write(f"{namn:<30} {antal:>5} rader\n")
 
 # Exempelanvändning:
-källmapp = "/home/dennis/test_git/jacktime"
-utfil = "/home/dennis/test_git/jacktime/tools/Tidtagning_Project.txt"
+källmapp = "/home/dennis/jacktime"
+utfil = "/home/dennis/Tidtagning_Project.txt"
 
 samla_kod_med_rader(källmapp, utfil)

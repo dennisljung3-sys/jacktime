@@ -104,7 +104,11 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
         from metadata import spara_metadata_och_frame_tider as spara_resultat
         spara_analysresultat(aktuell_fil, loggade_tider_total)
 
-        loppnamn_sanerat = sanera_filnamn(valt_loppnamn)
+        if valt_loppnamn is None:
+            loppnamn_sanerat = "träning"
+        else:
+            loppnamn_sanerat = sanera_filnamn(valt_loppnamn)
+
         spara_sammanfattning_json(startlista_namn, loppnamn_sanerat, loggade_tider_total, metadata, startlista_dict)
         fråga_om_export(startlista_namn, loppnamn_sanerat, loggade_tider_total, startlista_dict)
 
