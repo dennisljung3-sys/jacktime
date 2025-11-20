@@ -11,6 +11,9 @@ man kan va tvungen att ge sig själv behörighet att använda usb portar
 sudo usermod -aG uucp $USER
 sudo usermod -aG lock $USER
 
+man kan också va tvungen att manuelt installera tk
+sudo pacman -S tk
+
 
 copilots readme
 
