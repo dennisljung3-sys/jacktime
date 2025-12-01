@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-REQUIREMENTS = os.path.join(PROJECT_ROOT, "requirements.txt")
+REQUIREMENTS = os.path.join(PROJECT_ROOT, "install", "requirements.txt")
 VENV_DIR = os.path.join(PROJECT_ROOT, "venv")
 
 
