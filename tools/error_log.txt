@@ -1,0 +1,69 @@
+2025-12-05 23:55:07,441 [ERROR] list index out of range
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 21, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 52, in starta_traningsläge
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 47, in starta_traningsläge
+    senaste_video = inspelningar[-1]["fil"]
+                    ~~~~~~~~~~~~^^^^
+IndexError: list index out of range
+
+2025-12-05 23:57:21,454 [ERROR] cannot access local variable 'startlista_dict' where it is not associated with a value
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 21, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 48, in starta_traningsläge
+    starta_analysläge(senaste_video, valt_loppnamn=None, tillåt_nästa_lopp=False)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/analys_main.py", line 68, in starta_analysläge
+    visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+                                                            ^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'startlista_dict' where it is not associated with a value
+
+2025-12-06 00:07:54,410 [ERROR] cannot access local variable 'startlista_dict' where it is not associated with a value
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 21, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 48, in starta_traningsläge
+    starta_analysläge(senaste_video, valt_loppnamn=None, tillåt_nästa_lopp=False)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/analys_main.py", line 68, in starta_analysläge
+    visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+                                                            ^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'startlista_dict' where it is not associated with a value
+
+2025-12-06 00:07:54,410 [ERROR] Senaste terminalrader innan kraschen:
+2025-12-06 00:07:54,411 [ERROR] 7. Inställningsmeny
+2025-12-06 00:07:54,411 [ERROR] 8. Avsluta
+2025-12-06 00:07:54,411 [ERROR] 👉 Välj (1–8):
+2025-12-06 00:07:54,411 [ERROR] 🏋️‍♂️ Startar träningsläge...
+2025-12-06 00:07:54,411 [ERROR] ⏳ Tryck [enter] när du är redo att ta emot startsignal...
+2025-12-06 00:07:54,411 [ERROR] 🟡 Tryck [Enter] för manuell start eller [ESC] + [Enter] för att avbryta...
+2025-12-06 00:07:54,411 [ERROR] ✅ Startsignal från Arduino!
+2025-12-06 00:07:54,411 [ERROR] 🎬 Tryck [mellanslag] för att starta/pausa inspelning, [q] för att avsluta.
+2025-12-06 00:07:54,412 [ERROR] ▶️ Startar inspelning
+2025-12-06 00:07:54,412 [ERROR] ⏸️ Pausar inspelning
+2025-12-06 00:07:54,412 [ERROR] 🛑 Avslutar inspelning.
+2025-12-06 00:07:54,412 [ERROR] 🧮 Frame-tider sparade: 21 st → 00-07-38__1_frame_tider.csv
+2025-12-06 00:07:54,412 [ERROR] 📝 Metadata sparad: 00-07-38__1.json
+2025-12-06 00:07:54,412 [ERROR] 🔍 Vill du analysera det här träningsloppet direkt? (j/n):
+2025-12-06 00:07:54,412 [ERROR] 📁 Laddar analys för lopp: None
+2025-12-06 00:07:54,412 [ERROR] 🎞️ Antal videor att analysera: 1
+2025-12-06 00:07:54,412 [ERROR] 🎞️ Tillgängliga videor:
+2025-12-06 00:07:54,413 [ERROR] 1. 00-07-38__1.avi
+2025-12-06 00:07:54,413 [ERROR] 🧭 Tangenter: [v] välj video, [s] sammanfatta, [r] radera tider, [q] avsluta
+2025-12-06 00:07:54,413 [ERROR] 👉 Välj:
