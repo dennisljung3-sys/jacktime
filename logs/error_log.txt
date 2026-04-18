@@ -1,0 +1,16 @@
+2026-04-18 12:28:28,760 [ERROR] 'str' object has no attribute 'extend'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 56, in huvudmeny
+    visa_analysmeny()
+    ~~~~~~~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 157, in visa_analysmeny
+    starta_analysläge(matchande_videor[0], valt_loppnamn=None, tillåt_nästa_lopp=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/analys_main.py", line 96, in starta_analysläge
+    loggade_tider_total[hund].extend(tider if isinstance(tider, list) else [tider])
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'extend'
+

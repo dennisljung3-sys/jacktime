@@ -1,3 +1,4 @@
+# traning.py
 from paths import relativ_sökväg
 import os
 import datetime
@@ -8,16 +9,20 @@ from metadata import spara_metadata_och_frame_tider
 from analys_main import starta_analysläge
 from textutils import sanera_filnamn
 
+
 def skapa_traningsmapp():
     basmapp = relativ_sökväg("träning")
     os.makedirs(basmapp, exist_ok=True)
     datum = datetime.date.today().isoformat()
     dagens_mapp = os.path.join(basmapp, datum)
     if os.path.isfile(dagens_mapp):
-        print(f"⚠️ En fil med namnet '{dagens_mapp}' blockerar sparning. Ta bort den först.")
+        print(
+            f"⚠️ En fil med namnet '{dagens_mapp}' blockerar sparning. Ta bort den först."
+        )
         return None
     os.makedirs(dagens_mapp, exist_ok=True)
     return dagens_mapp
+
 
 def starta_traningsläge(config):
     print("\n🏋️‍♂️ Startar träningsläge...")
@@ -25,7 +30,12 @@ def starta_traningsläge(config):
     if not spara_mapp:
         return
 
+    # OBS: förbered_kamera_och_mållinje returnerar nu cap från fönsterhanteraren
     cap, metadata = förbered_kamera_och_mållinje(config)
+    if cap is None:
+        print("❌ Kunde inte förbereda kameran.")
+        return
+
     config["mållinje_x"] = metadata.get("mållinje_x")
     config["skärmstorlek"] = metadata.get("skärmstorlek")
 
@@ -37,17 +47,27 @@ def starta_traningsläge(config):
 
     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
     filnamnsbas = sanera_filnamn(tidtagning_str)
-    inspelningar = kör_inspelningsloop(cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"])
+
+    # Använd samma cap som redan är öppen från förbered_kamera_och_mållinje
+    inspelningar = kör_inspelningsloop(
+        cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"]
+    )
 
     for insp in inspelningar:
         spara_metadata_och_frame_tider(insp, config, start_tid)
 
-    svar = input("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ").strip().lower()
-    if svar == "j":
+    svar = (
+        input("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ")
+        .strip()
+        .lower()
+    )
+    if svar == "j" and inspelningar:
         senaste_video = inspelningar[-1]["fil"]
         starta_analysläge(senaste_video, valt_loppnamn=None, tillåt_nästa_lopp=False)
 
-    svar2 = input("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ").strip().lower()
+    svar2 = (
+        input("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ").strip().lower()
+    )
     if svar2 == "j":
         starta_traningsläge(config)
     else:

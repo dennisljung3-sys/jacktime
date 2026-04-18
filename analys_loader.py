@@ -1,8 +1,10 @@
+# analys_loader.py
 from paths import relativ_sökväg
 import cv2
 import json
 import os
 from textutils import normalisera, sanera_filnamn
+
 
 def ladda_video_och_metadata(videofil, valt_loppnamn=None):
     if not os.path.exists(videofil):
@@ -20,7 +22,9 @@ def ladda_video_och_metadata(videofil, valt_loppnamn=None):
     if "metadata" in filinnehåll:
         metadata = filinnehåll["metadata"]
     else:
-        metadata = {k: v for k, v in filinnehåll.items() if k not in ["tider", "startlista"]}
+        metadata = {
+            k: v for k, v in filinnehåll.items() if k not in ["tider", "startlista"]
+        }
 
     startlista = filinnehåll.get("startlista", {})
 
@@ -39,8 +43,7 @@ def ladda_video_och_metadata(videofil, valt_loppnamn=None):
         loppnamn = os.path.splitext(os.path.basename(videofil))[0]
         if not startlista:
             startlista = {
-                str(i): {"namn": f"Hund {i}", "klubb": ""}
-                for i in range(1, 7)
+                str(i): {"namn": f"Hund {i}", "klubb": ""} for i in range(1, 7)
             }
         cap = cv2.VideoCapture(videofil)
         if not cap.isOpened():
@@ -48,7 +51,9 @@ def ladda_video_och_metadata(videofil, valt_loppnamn=None):
             return None, None, None, None, None
         return cap, metadata, startlista, loppnamn, "träning"
 
-    startlista_fil = relativ_sökväg("startlistor", f"{sanera_filnamn(startlista_namn)}.json")
+    startlista_fil = relativ_sökväg(
+        "startlistor", f"{sanera_filnamn(startlista_namn)}.json"
+    )
     if not os.path.exists(startlista_fil):
         print(f"❌ Startlista saknas: {startlista_fil}")
         return None, None, None, None, None
@@ -59,8 +64,12 @@ def ladda_video_och_metadata(videofil, valt_loppnamn=None):
     valt_loppnamn = valt_loppnamn.replace("_", " ") if valt_loppnamn else None
 
     matchande_lopp = next(
-        (lopp for lopp in alla_lopp if normalisera(lopp.get("lopp_namn", "")) == normalisera(valt_loppnamn)),
-        None
+        (
+            lopp
+            for lopp in alla_lopp
+            if normalisera(lopp.get("lopp_namn", "")) == normalisera(valt_loppnamn)
+        ),
+        None,
     )
     if not matchande_lopp:
         print(f"❌ Hittade inget lopp med namn '{valt_loppnamn}' i startlistan.")
@@ -68,10 +77,7 @@ def ladda_video_och_metadata(videofil, valt_loppnamn=None):
 
     loppnamn = matchande_lopp.get("lopp_namn", "Okänt lopp")
     hundar = matchande_lopp.get("hundar", {})
-    startlista = {
-        str(nr): {"namn": namn, "klubb": ""}
-        for nr, namn in hundar.items()
-    }
+    startlista = {str(nr): {"namn": namn, "klubb": ""} for nr, namn in hundar.items()}
 
     cap = cv2.VideoCapture(videofil)
     if not cap.isOpened():

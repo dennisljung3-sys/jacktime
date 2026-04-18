@@ -17,6 +17,8 @@ resultat/
 träning/
 *.avi
 *.json
+dist/
+build/
 
 # Ignorera IDE-specifika filer
 .idea/
