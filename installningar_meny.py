@@ -145,7 +145,7 @@ def andra_kamera(config):
         cv2.imshow(fönster.fönster_namn, visning)
 
         # Hantera tangentbord
-        tangent = cv2.waitKey(30) & 0xFF
+        tangent = cv2.waitKey(1) & 0xFF
 
         if tangent == ord("q"):
             bekräftad = True

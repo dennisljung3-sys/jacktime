@@ -248,7 +248,7 @@ def hantera_loggning(cap, metadata, startlista):
         cv2.imshow(fönster.fönster_namn, overlay)
 
         # Hantera tangentbord
-        tangent = cv2.waitKey(30) & 0xFF
+        tangent = cv2.waitKey(1) & 0xFF
 
         # Anropa tangent_callback om tangent tryckts
         if tangent != 255:  # 255 betyder ingen tangent

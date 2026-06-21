@@ -113,7 +113,7 @@ def kör_inspelningsloop(
         cv2.imshow(fönster.fönster_namn, frame_overlay)
 
         # Hantera tangentbord
-        tangent = cv2.waitKey(30) & 0xFF
+        tangent = cv2.waitKey(1) & 0xFF
 
         if tangent == ord(" "):
             inspelning_aktiv = not inspelning_aktiv

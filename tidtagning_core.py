@@ -133,7 +133,7 @@ def förbered_kamera_och_mållinje(config):
         cv2.imshow(fönster.fönster_namn, visning)
 
         # Hantera tangentbord
-        tangent = cv2.waitKey(30) & 0xFF
+        tangent = cv2.waitKey(1) & 0xFF
 
         if tangent == ord("\r") or tangent == ord("\n"):  # Enter
             # Bekräfta nuvarande mållinje
