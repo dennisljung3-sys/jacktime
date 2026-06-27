@@ -14,3 +14,16 @@ Traceback (most recent call last):
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'str' object has no attribute 'extend'
 
+2026-06-21 03:06:02,346 [ERROR] 'arduino_port'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 43, in starta_traningsläge
+    start_tid = vänta_på_startsignal(config["arduino_port"])
+                                     ~~~~~~^^^^^^^^^^^^^^^^
+KeyError: 'arduino_port'
+
