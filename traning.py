@@ -25,6 +25,10 @@ def skapa_traningsmapp():
 
 
 def starta_traningsläge(config):
+    from confighantering import ladda_config
+
+    config = ladda_config()
+
     print("\n🏋️‍♂️ Startar träningsläge...")
     spara_mapp = skapa_traningsmapp()
     if not spara_mapp:

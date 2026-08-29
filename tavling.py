@@ -8,6 +8,7 @@ from analys_main import starta_analysläge
 from gemensamt import ladda_startlista
 from textutils import sanera_filnamn
 
+
 def välj_startlista():
     filer = [f for f in os.listdir("startlistor") if f.endswith(".json")]
     if not filer:
@@ -22,6 +23,7 @@ def välj_startlista():
         return None
     return os.path.splitext(filer[int(val) - 1])[0]
 
+
 def välj_lopp(startlista):
     print("\n🏁 Tillgängliga lopp:")
     for i, lopp in enumerate(startlista, 1):
@@ -33,7 +35,18 @@ def välj_lopp(startlista):
     index = int(val) - 1
     return startlista[index], index
 
-def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_index=None, hoppa_fortsättningsfråga=False):
+
+def starta_tavlingsläge(
+    config,
+    startlista_namn=None,
+    startlista=None,
+    lopp_index=None,
+    hoppa_fortsättningsfråga=False,
+):
+    from confighantering import ladda_config
+
+    config = ladda_config()
+
     print("\n🏁 Startar tävlingsläge...")
 
     if not startlista_namn:
@@ -56,7 +69,9 @@ def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_ind
 
     spara_mapp = os.path.join("resultat", sanera_filnamn(startlista_namn))
     if os.path.isfile(spara_mapp):
-        print(f"⚠️ En fil med namnet '{spara_mapp}' blockerar sparning. Ta bort den först.")
+        print(
+            f"⚠️ En fil med namnet '{spara_mapp}' blockerar sparning. Ta bort den först."
+        )
         return
     os.makedirs(spara_mapp, exist_ok=True)
 
@@ -72,15 +87,19 @@ def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_ind
 
     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
     loppnamn_rensad = sanera_filnamn(valt_lopp["lopp_namn"])
-    filnamnsbas = f"Lopp-{lopp_index+1}__{loppnamn_rensad}__{tidtagning_str}"
-    inspelningar = kör_inspelningsloop(cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"])
+    filnamnsbas = f"Lopp-{lopp_index + 1}__{loppnamn_rensad}__{tidtagning_str}"
+    inspelningar = kör_inspelningsloop(
+        cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"]
+    )
 
     for insp in inspelningar:
         insp["lopp_index"] = lopp_index + 1
         insp["lopp_namn"] = valt_lopp["lopp_namn"]
         spara_metadata_och_frame_tider(insp, config, start_tid)
 
-    svar = input("\n🔍 Vill du analysera det här loppet direkt? (j/n): ").strip().lower()
+    svar = (
+        input("\n🔍 Vill du analysera det här loppet direkt? (j/n): ").strip().lower()
+    )
     if svar == "j":
         senaste_video = inspelningar[-1]["fil"]
         starta_analysläge(
@@ -89,7 +108,7 @@ def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_ind
             tillåt_nästa_lopp=True,
             startlista_namn=startlista_namn,
             startlista=startlista,
-            lopp_index=lopp_index
+            lopp_index=lopp_index,
         )
 
     if not hoppa_fortsättningsfråga:
@@ -101,4 +120,3 @@ def starta_tavlingsläge(config, startlista_namn=None, startlista=None, lopp_ind
             starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1)
         else:
             print("🏁 Tävlingspass avslutat.")
-

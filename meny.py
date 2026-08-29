@@ -10,6 +10,7 @@ from textutils import sanera_filnamn, normalisera
 from confighantering import ladda_config, spara_config
 import os
 
+
 def visa_jacktime_logga():
     print(r"""
       ██╗ █████╗  ██████╗██╗  ██╗████████╗██╗███╗   ███╗███████╗
@@ -20,6 +21,7 @@ def visa_jacktime_logga():
   ╚════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚═╝     ╚═╝╚══════╝
     """)
 
+
 def huvudmeny():
     if not hasattr(huvudmeny, "visad_logga"):
         visa_jacktime_logga()
@@ -29,7 +31,9 @@ def huvudmeny():
     print("📦 Sparade inställningar:")
     print(f"Arduino-port: {config.get('arduino_port')}")
     print(f"Kamera-index: {config.get('kamera_index')}")
-    print(f"FPS: {config.get('kamera_fps')} (verifierad: {config.get('verifierad_fps')})")
+    print(
+        f"FPS: {config.get('kamera_fps')} (verifierad: {config.get('verifierad_fps')})"
+    )
     print(f"Senaste lopp-ID: {config.get('senaste_lopp_id')}\n")
 
     while True:
@@ -66,6 +70,9 @@ def huvudmeny():
 
         elif val == "7":
             installningsmeny()
+            # Ladda om config EFTER att inställningar är klara
+            config = ladda_config()
+            print("🔄 Inställningar uppdaterade!")
 
         elif val == "8":
             print("👋 Avslutar programmet.")
@@ -73,6 +80,7 @@ def huvudmeny():
 
         else:
             print("❌ Ogiltigt val. Försök igen.\n")
+
 
 def visa_analysmeny():
     from analys_main import starta_analysläge
@@ -85,14 +93,14 @@ def visa_analysmeny():
     if val_typ == "1":
         basmapp = relativ_sökväg("resultat")
         mappar = [
-            d for d in os.listdir(basmapp)
+            d
+            for d in os.listdir(basmapp)
             if os.path.isdir(os.path.join(basmapp, d)) and d != "träning"
         ]
     elif val_typ == "2":
         basmapp = relativ_sökväg("träning")
         mappar = [
-            d for d in os.listdir(basmapp)
-            if os.path.isdir(os.path.join(basmapp, d))
+            d for d in os.listdir(basmapp) if os.path.isdir(os.path.join(basmapp, d))
         ]
     else:
         print("❌ Ogiltigt val.")
@@ -145,19 +153,24 @@ def visa_analysmeny():
         return
 
     valt_prefix = loppnamn_lista[int(val_lopp) - 1]
-    matchande_videor = sorted([
-        os.path.join(full_path, f) for f in loppgrupper[valt_prefix]
-    ])
+    matchande_videor = sorted(
+        [os.path.join(full_path, f) for f in loppgrupper[valt_prefix]]
+    )
 
     if not matchande_videor:
         print("❌ Inga videor hittades för valt lopp.")
         return
 
     if val_typ == "2":
-        starta_analysläge(matchande_videor[0], valt_loppnamn=None, tillåt_nästa_lopp=True)
+        starta_analysläge(
+            matchande_videor[0], valt_loppnamn=None, tillåt_nästa_lopp=True
+        )
     else:
         loppnamn = valt_prefix.split("__")[1]
-        starta_analysläge(matchande_videor[0], sanera_filnamn(loppnamn), tillåt_nästa_lopp=True)
+        starta_analysläge(
+            matchande_videor[0], sanera_filnamn(loppnamn), tillåt_nästa_lopp=True
+        )
+
 
 def visa_sammanfattningsmeny():
     print("\n📊 Vill du visa sammanfattning för:")
@@ -169,25 +182,27 @@ def visa_sammanfattningsmeny():
         är_träning = False
         basmapp = relativ_sökväg("resultat")
         mappar = [
-            d for d in os.listdir(basmapp)
+            d
+            for d in os.listdir(basmapp)
             if os.path.isdir(os.path.join(basmapp, d)) and d != "träning"
         ]
     elif val_typ == "2":
         är_träning = True
         basmapp = relativ_sökväg("träning")
         mappar = [
-            d for d in os.listdir(basmapp)
-            if os.path.isdir(os.path.join(basmapp, d))
+            d for d in os.listdir(basmapp) if os.path.isdir(os.path.join(basmapp, d))
         ]
     else:
         print("❌ Ogiltigt val.")
         return
 
     if not mappar:
-        print(f"❌ Inga sparade { 'träningspass' if är_träning else 'tävlingar' } hittades.")
+        print(
+            f"❌ Inga sparade {'träningspass' if är_träning else 'tävlingar'} hittades."
+        )
         return
 
-    print(f"\n📂 Tillgängliga { 'träningspass' if är_träning else 'tävlingar' }:")
+    print(f"\n📂 Tillgängliga {'träningspass' if är_träning else 'tävlingar'}:")
     for i, namn in enumerate(mappar, 1):
         print(f"  {i}. {namn}")
 
@@ -203,7 +218,11 @@ def visa_sammanfattningsmeny():
     def är_giltig_jsonfil(filnamn):
         if not filnamn.endswith(".json"):
             return False
-        if "__analys__" in filnamn or "__frame_tider" in filnamn or "_sammanfattning" in filnamn:
+        if (
+            "__analys__" in filnamn
+            or "__frame_tider" in filnamn
+            or "_sammanfattning" in filnamn
+        ):
             return False
         return True
 
@@ -211,10 +230,7 @@ def visa_sammanfattningsmeny():
 
     if not är_träning:
         avi_basnamn = {os.path.splitext(f)[0] for f in alla_filer if f.endswith(".avi")}
-        jsonfiler = [
-            f for f in jsonfiler
-            if os.path.splitext(f)[0] not in avi_basnamn
-        ]
+        jsonfiler = [f for f in jsonfiler if os.path.splitext(f)[0] not in avi_basnamn]
 
     if not jsonfiler:
         print("⚠️ Inga sparade lopp hittades i mappen.")
@@ -223,7 +239,9 @@ def visa_sammanfattningsmeny():
     print(f"\n📋 Lopp i '{vald_mapp}':")
     for i, fil in enumerate(sorted(jsonfiler), 1):
         print(f"  {i}. {os.path.splitext(fil)[0]}")
-    print(f"  {len(jsonfiler)+1}. Exportera hela { 'träningspasset' if är_träning else 'tävlingen' } till Excel")
+    print(
+        f"  {len(jsonfiler) + 1}. Exportera hela {'träningspasset' if är_träning else 'tävlingen'} till Excel"
+    )
 
     val2 = input("🔢 Välj lopp eller export (nummer): ").strip()
     if not val2.isdigit():
@@ -235,6 +253,8 @@ def visa_sammanfattningsmeny():
         exportera_hel_tävling(vald_mapp)
     elif 1 <= val2 <= len(jsonfiler):
         loppnamn = os.path.splitext(sorted(jsonfiler)[val2 - 1])[0]
-        visa_tidigare_sammanfattning(vald_mapp, sanera_filnamn(loppnamn), är_träning=är_träning)
+        visa_tidigare_sammanfattning(
+            vald_mapp, sanera_filnamn(loppnamn), är_träning=är_träning
+        )
     else:
         print("❌ Ogiltigt val.")
