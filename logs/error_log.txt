@@ -27,3 +27,21 @@ Traceback (most recent call last):
                                      ~~~~~~^^^^^^^^^^^^^^^^
 KeyError: 'arduino_port'
 
+2026-08-22 15:41:05,423 [ERROR] '<' not supported between instances of 'str' and 'float'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 65, in huvudmeny
+    visa_sammanfattningsmeny()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 238, in visa_sammanfattningsmeny
+    visa_tidigare_sammanfattning(vald_mapp, sanera_filnamn(loppnamn), är_träning=är_träning)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/sammanfattning.py", line 196, in visa_tidigare_sammanfattning
+    visa_sammanfattning(loppnamn, loggade_tider, startlista or {})
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/sammanfattning.py", line 65, in visa_sammanfattning
+    tid_lista = sorted(tid)
+TypeError: '<' not supported between instances of 'str' and 'float'
+
