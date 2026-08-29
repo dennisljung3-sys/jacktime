@@ -1,4 +1,4 @@
-# installningar_meny.py
+# installningar_meny.py - FULLSTÄNDIG version
 import os
 import json
 import platform
@@ -32,20 +32,23 @@ def installningsmeny():
             f"1. Andra kamera och FPS (nu: index {config.get('kamera_index')} @ {config.get('kamera_fps')} FPS)"
         )
         print(f"2. Andra Arduino-port (nu: {config.get('arduino_port')})")
-        print("3. Kalibrera kamera")
-        print("4. Visa aktuell konfiguration")
-        print("5. Tillbaka till huvudmenyn")
-        val = input("👉 Välj (1–5): ").strip()
+        print(f"3. Sätt mållinje (nu: {config.get('mållinje_x')})")
+        print("4. Kalibrera kamera")
+        print("5. Visa aktuell konfiguration")
+        print("6. Tillbaka till huvudmenyn")
+        val = input("👉 Välj (1–6): ").strip()
 
         if val == "1":
             andra_kamera(config)
         elif val == "2":
             andra_arduino(config)
         elif val == "3":
-            kalibrera_kamera()
+            sätt_mållinje(config)
         elif val == "4":
-            visa_konfiguration(config)
+            kalibrera_kamera()
         elif val == "5":
+            visa_konfiguration(config)
+        elif val == "6":
             break
         else:
             print("❌ Ogiltigt val. Försök igen.")
@@ -99,8 +102,8 @@ def andra_kamera(config):
 
     # Hämta kamerainställningar
     cap = fönster.cap
-    höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    original_höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    original_bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     verifierad_fps = cap.get(cv2.CAP_PROP_FPS)
 
     print(f"\n📺 Visar live-feed från kamera {valt_index} i JackTime-fönstret.")
@@ -120,6 +123,12 @@ def andra_kamera(config):
         if not ret:
             print("❌ Kunde inte läsa från kameran.")
             break
+
+        # ⭐ ROTERA BILDEN 90° MOTURS
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        # Hämta nya dimensioner (behövs för textpositioner)
+        höjd, bredd = frame.shape[:2]
 
         # Skapa en kopia för visning
         visning = frame.copy()
@@ -214,6 +223,159 @@ def andra_arduino(config):
     config["arduino_port"] = vald_port
     spara_config(config)
     print(f"\n💾 Arduino-port sparad: {vald_port}")
+
+
+def sätt_mållinje(config):
+    """Sätter mållinjen och sparar i config"""
+    print("\n📍 Sätter mållinje...")
+
+    # Hämta fönsterhanteraren
+    from fönsterhanterare import get_fönster
+
+    fönster = get_fönster()
+
+    if fönster is None:
+        print("❌ Fönsterhanteraren är inte tillgänglig!")
+        return
+
+    # Kontrollera att kamera är vald
+    kamera_index = config.get("kamera_index")
+    if kamera_index is None:
+        print("❌ Välj kamera först! (Inställningar → Andra kamera)")
+        return
+
+    # Koppla kameran
+    if not fönster.koppla_kamera(kamera_index):
+        print("❌ Kunde inte öppna kameran.")
+        return
+
+    # Hämta kamerainställningar
+    cap = fönster.cap
+    original_höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    original_bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+
+    # Efter rotation kommer höjd och bredd att byta plats
+    print(f"📷 Kamera ansluten: {original_bredd}x{original_höjd}")
+
+    # Hämta sparad mållinje (om den finns)
+    mållinje_x = config.get("mållinje_x")
+    if mållinje_x is not None:
+        print(f"📌 Sparad mållinje: x = {mållinje_x}")
+        print("   Tryck ENTER för att använda sparad, eller A/D/klicka för att justera")
+    else:
+        print("📍 Ingen sparad mållinje - ställ in nu")
+
+    # Variabler
+    mållinje_ändrad = False
+    bekräftad = False
+
+    # Byt läge till förhandsvisning
+    fönster.byt_läge("förhandsvisning")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("❌ Kunde inte läsa från kameran.")
+            break
+
+        # ⭐ ROTERA BILDEN 90° MOTURS
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        # ⭐ HÄMTA NYA DIMENSIONER EFTER ROTATION
+        höjd, bredd = frame.shape[:2]
+
+        visning = frame.copy()
+
+        # Rita mållinje
+        if mållinje_x is not None:
+            cv2.line(visning, (mållinje_x, 0), (mållinje_x, höjd), (0, 0, 255), 3)
+            if not mållinje_ändrad:
+                cv2.putText(
+                    visning,
+                    "SPARAD MALLINJE (röd) - Tryck ENTER för att använda",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2,
+                )
+        else:
+            # Temporär mållinje i mitten (grå)
+            mitt_x = bredd // 2
+            cv2.line(visning, (mitt_x, 0), (mitt_x, höjd), (100, 100, 100), 2)
+            cv2.putText(
+                visning,
+                "TEMP MALLINJE - Klicka eller A/D för att flytta",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (150, 150, 150),
+                2,
+            )
+
+        # Instruktioner
+        cv2.putText(
+            visning,
+            "A/D = flytta linje, ENTER = spara, Q = avbryt",
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
+        )
+
+        # Position
+        if mållinje_x is not None:
+            pos_text = f"Position: {mållinje_x}" + (
+                " (justerad)" if mållinje_ändrad else " (sparad)"
+            )
+            cv2.putText(
+                visning,
+                pos_text,
+                (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (200, 200, 200),
+                1,
+            )
+
+        cv2.imshow(fönster.fönster_namn, visning)
+        tangent = cv2.waitKey(1) & 0xFF
+
+        if tangent == ord("\r") or tangent == ord("\n"):  # Enter
+            if mållinje_x is not None:
+                bekräftad = True
+                break
+            else:
+                print("⚠️ Sätt en mållinje först (klicka eller A/D)")
+        elif tangent == ord("q"):
+            print("❌ Avbröt.")
+            break
+        elif tangent == ord("a"):
+            if mållinje_x is None:
+                mållinje_x = bredd // 2
+            mållinje_x = max(0, mållinje_x - 10)
+            mållinje_ändrad = True
+            print(f"📍 Mållinje flyttad till x = {mållinje_x}")
+        elif tangent == ord("d"):
+            if mållinje_x is None:
+                mållinje_x = bredd // 2
+            mållinje_x = min(bredd, mållinje_x + 10)
+            mållinje_ändrad = True
+            print(f"📍 Mållinje flyttad till x = {mållinje_x}")
+
+    # Koppla från kameran
+    fönster.koppla_från_kamera()
+    fönster.byt_läge("tom")
+    fönster.visa_startsida()
+
+    # Spara om bekräftad
+    if bekräftad and mållinje_x is not None:
+        config["mållinje_x"] = mållinje_x
+        spara_config(config)
+        print(f"💾 Mållinje sparad: x = {mållinje_x}")
+    else:
+        print("❌ Ingen mållinje sparades.")
 
 
 def kalibrera_kamera():

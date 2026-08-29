@@ -45,3 +45,32 @@ Traceback (most recent call last):
     tid_lista = sorted(tid)
 TypeError: '<' not supported between instances of 'str' and 'float'
 
+2026-08-29 16:34:52,333 [ERROR] name 'las_config' is not defined
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 72, in huvudmeny
+    installningsmeny()
+    ~~~~~~~~~~~~~~~~^^
+  File "/home/dennis/jacktime/installningar_meny.py", line 6, in installningsmeny
+    config = las_config()
+             ^^^^^^^^^^
+NameError: name 'las_config' is not defined
+
+2026-08-29 16:39:35,969 [ERROR] name 'get_fönster' is not defined
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 56, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 38, in starta_traningsläge
+    cap, metadata = förbered_kamera_och_mållinje(config)
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/tidtagning_core.py", line 16, in förbered_kamera_och_mållinje
+    fönster = get_fönster()
+              ^^^^^^^^^^^
+NameError: name 'get_fönster' is not defined
+

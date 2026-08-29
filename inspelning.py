@@ -55,6 +55,12 @@ def kör_inspelningsloop(
             print("❌ Kunde inte läsa från kameran.")
             break
 
+        # ⭐ ROTERA BILDEN 90° MOTURS
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        # Hämta nya dimensioner efter rotation (behövs för REC-indikator)
+        höjd, bredd = frame.shape[:2]
+
         elapsed = time.time() - start_tid
         justerad_tid = elapsed - (justerad_latens_ms / 1000)
         tid_str = f"{justerad_tid:.3f} s"
@@ -67,7 +73,6 @@ def kör_inspelningsloop(
 
         # Om inspelning pågår, spara till video och visa REC-indikator
         if inspelning_aktiv:
-            höjd, bredd = frame_overlay.shape[:2]
             rec_x = bredd - 100
             rec_y = 30
             cv2.circle(frame_overlay, (rec_x, rec_y), 10, (0, 0, 255), -1)
