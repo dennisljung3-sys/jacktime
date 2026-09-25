@@ -34,6 +34,21 @@ def förbered_kamera_och_mållinje(config):
     """
     Förbereder kameran och visar förhandsvisning med sparad mållinje.
     """
+    # Hämta fönsterhanteraren
+    fönster = get_fönster()
+    if fönster is None:
+        print("❌ Fönsterhanteraren är inte tillgänglig!")
+        return None, {}
+
+    # ⭐ Kontrollera om kameran redan är öppen - stäng den isåfall
+    if fönster.kamera_aktiv:
+        print("🔄 Kameran var redan öppen - stänger och öppnar igen...")
+        fönster.koppla_från_kamera()
+        # Vänta lite så att kameran hinner frigöras
+        import time
+
+        time.sleep(0.5)
+
     # Hämta sparad mållinje från config
     mållinje_x = config.get("mållinje_x")
     if mållinje_x is None:
@@ -41,20 +56,26 @@ def förbered_kamera_och_mållinje(config):
         # Använd mitten som fallback (sätts senare när vi har bredden)
         mållinje_x = 320
 
-    # Hämta fönsterhanteraren
-    fönster = get_fönster()
-    if fönster is None:
-        print("❌ Fönsterhanteraren är inte tillgänglig!")
-        return None, {}
-
     # Koppla kameran via fönsterhanteraren
     kamera_index = config.get("kamera_index")
     if kamera_index is None:
         print("❌ Ingen kamera vald. Gå till inställningar först.")
         return None, {}
 
-    if not fönster.koppla_kamera(kamera_index):
-        print("❌ Kunde inte öppna kameran.")
+    # ⭐ Försök öppna kameran med retry om den är upptagen
+    max_försök = 3
+    for försök in range(max_försök):
+        if fönster.koppla_kamera(kamera_index):
+            break
+        else:
+            print(
+                f"⚠️ Försök {försök + 1}/{max_försök} att öppna kameran misslyckades..."
+            )
+            import time
+
+            time.sleep(1)
+    else:
+        print("❌ Kunde inte öppna kameran efter flera försök.")
         return None, {}
 
     # Hämta kamerainställningar

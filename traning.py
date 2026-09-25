@@ -8,6 +8,7 @@ from inspelning import kör_inspelningsloop
 from metadata import spara_metadata_och_frame_tider
 from analys_main import starta_analysläge
 from textutils import sanera_filnamn
+from fönsterhanterare import get_fönster
 
 
 def skapa_traningsmapp():
@@ -25,7 +26,7 @@ def skapa_traningsmapp():
 
 
 def starta_traningsläge(config):
-    from confighantering import ladda_config
+    from confighantering import ladda_config, spara_config
 
     config = ladda_config()
 
@@ -34,7 +35,7 @@ def starta_traningsläge(config):
     if not spara_mapp:
         return
 
-    # OBS: förbered_kamera_och_mållinje returnerar nu cap från fönsterhanteraren
+    # OBS: förbered_kamera_och_mållinje returnerar cap från fönsterhanteraren
     cap, metadata = förbered_kamera_och_mållinje(config)
     if cap is None:
         print("❌ Kunde inte förbereda kameran.")
@@ -47,6 +48,10 @@ def starta_traningsläge(config):
     start_tid = vänta_på_startsignal(config["arduino_port"])
     if start_tid is None:
         print("↩️ Tidtagning avbruten – återgår till huvudmenyn.")
+        # ⭐ Viktigt: frigör kameran om den är öppen
+        fönster = get_fönster()
+        if fönster and fönster.kamera_aktiv:
+            fönster.koppla_från_kamera()
         return
 
     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
@@ -59,6 +64,12 @@ def starta_traningsläge(config):
 
     for insp in inspelningar:
         spara_metadata_och_frame_tider(insp, config, start_tid)
+
+    # ⭐ Viktigt: frigör kameran EFTER inspelningen
+    fönster = get_fönster()
+    if fönster and fönster.kamera_aktiv:
+        fönster.koppla_från_kamera()
+        print("📷 Kamera frigjord efter inspelning.")
 
     svar = (
         input("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ")
@@ -73,6 +84,8 @@ def starta_traningsläge(config):
         input("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ").strip().lower()
     )
     if svar2 == "j":
+        # ⭐ Ladda om config för att få eventuella uppdateringar
+        config = ladda_config()
         starta_traningsläge(config)
     else:
         print("🏁 Träningspass avslutat.")
