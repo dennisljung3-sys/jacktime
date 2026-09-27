@@ -1,7 +1,40 @@
+# startlista.py
 from paths import relativ_sökväg
 import os
 import json
+import re
 from textutils import sanera_filnamn
+
+
+def normalisera_loppnamn(startlista):
+    """
+    Tar bort befintligt loppnummer-prefix och lägger till rätt nummer
+    baserat på loppets position i listan.
+
+    Format: "N-Loppnamn" där N är 1-baserat index.
+
+    Exempel:
+    - "DennisLoppet" (position 0) → "1-DennisLoppet"
+    - "1-DennisLoppet" (position 0) → "1-DennisLoppet"
+    - "3-DennisLoppet" (position 2) → "3-DennisLoppet"
+    - "1 1 DennisLoppet" (position 0) → "1-DennisLoppet"
+    """
+    for i, lopp in enumerate(startlista):
+        namn = lopp.get("lopp_namn", "").strip()
+
+        # Ta bort eventuellt befintligt prefix (siffra + valfritt separator)
+        # Matchar "1-", "12-", "1 ", "12 ", "1. " etc i början
+        namn_utan_prefix = re.sub(r"^\d+[\s\-\.]+", "", namn).strip()
+
+        # Om namnet är tomt efter rensning, använd ett standardnamn
+        if not namn_utan_prefix:
+            namn_utan_prefix = "Lopp"
+
+        # Lägg till rätt loppnummer med bindestreck
+        lopp["lopp_namn"] = f"{i + 1}-{namn_utan_prefix}"
+
+    return startlista
+
 
 def välj_månad():
     månader = [
@@ -19,6 +52,7 @@ def välj_månad():
         except ValueError:
             pass
         print("❌ Ogiltigt val. Försök igen.")
+
 
 def mata_in_lopp():
     while True:
@@ -48,6 +82,7 @@ def mata_in_lopp():
         else:
             print("🔄 Mata in loppet igen.")
 
+
 def skapa_startlista():
     print("\n🆕 Skapa startlista")
 
@@ -71,6 +106,14 @@ def skapa_startlista():
         fler = input("\n➕ Vill du lägga till ett lopp till? (j/n): ").strip().lower()
         if fler != "j":
             break
+
+    # ⭐ NYTT: Normalisera loppnamn innan sparande
+    startlista = normalisera_loppnamn(startlista)
+
+    # Visa sammanfattning av vad som sparas
+    print("\n📋 Lopp som sparas:")
+    for lopp in startlista:
+        print(f"  - {lopp['lopp_namn']}")
 
     with open(filväg, "w", encoding="utf-8") as f:
         json.dump(startlista, f, indent=2, ensure_ascii=False)

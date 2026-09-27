@@ -8,6 +8,7 @@ from installningar_meny import installningsmeny
 from sammanfattning import visa_tidigare_sammanfattning, exportera_hel_tävling
 from textutils import sanera_filnamn, normalisera
 from confighantering import ladda_config, spara_config
+from fifo_input import input_från_fifo, skriv_status   # ⭐ NYTT
 import os
 
 
@@ -36,17 +37,38 @@ def huvudmeny():
     )
     print(f"Senaste lopp-ID: {config.get('senaste_lopp_id')}\n")
 
+    # ⭐ Menyvalen – används både för utskrift och för status till GUI:t
+    menyval = [
+        {"nr": 1, "text": "Starta Tävlingsläge", "emoji": "🏁"},
+        {"nr": 2, "text": "Starta Träningsläge", "emoji": "🏋️"},
+        {"nr": 3, "text": "Starta analysläge", "emoji": "📊"},
+        {"nr": 4, "text": "Skapa startlista", "emoji": "📝"},
+        {"nr": 5, "text": "Redigera startlista", "emoji": "✏️"},
+        {"nr": 6, "text": "Visa resultat och sammanfattningar", "emoji": "📈"},
+        {"nr": 7, "text": "Inställningsmeny", "emoji": "⚙️"},
+        {"nr": 8, "text": "Avsluta", "emoji": "🚪"},
+    ]
+
     while True:
+        # ⭐ Skriv status till GUI:t med alla menyval
+        skriv_status(
+            "huvudmeny",
+            kamera_index=config.get("kamera_index"),
+            arduino_port=config.get("arduino_port"),
+            kamera_fps=config.get("kamera_fps"),
+            verifierad_fps=config.get("verifierad_fps"),
+            menyval=menyval,
+            meddelande="Vad vill du göra?",
+        )
+
         print("🚀 Vad vill du göra?")
-        print("1. Starta Tävlingsläge")
-        print("2. Starta Träningsläge")
-        print("3. Starta analysläge")
-        print("4. Skapa startlista")
-        print("5. Redigera startlista")
-        print("6. Visa resultat och sammanfattningar")
-        print("7. Inställningsmeny")
-        print("8. Avsluta")
-        val = input("👉 Välj (1–8): ").strip()
+        for val_info in menyval:
+            print(f"{val_info['nr']}. {val_info['text']}")
+
+        val = input_från_fifo("👉 Välj (1–8): ").strip()
+
+        if val in [str(v["nr"]) for v in menyval]:
+            skriv_status("bearbetar", val=val, meddelande=f"Valde {val}")
 
         if val == "1":
             starta_tavlingsläge(config)
@@ -76,6 +98,7 @@ def huvudmeny():
 
         elif val == "8":
             print("👋 Avslutar programmet.")
+            skriv_status("avslutad")
             break
 
         else:

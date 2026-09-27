@@ -1,18 +1,17 @@
+# startsensor.py
 import serial
 import time
 import threading
-import platform
+from fifo_input import läs_tangent_från_kö, skriv_status
 
-if platform.system() == "Windows":
-    import msvcrt
-else:
-    import sys
-    import select
 
 def vänta_på_startsignal(arduino_port):
     """
-    Väntar på startsignal från Arduino eller tryck på Enter.
-    ESC avbryter och återgår till huvudmenyn.
+    Väntar på startsignal från Arduino eller Enter (från FIFO eller tangentbord).
+    'esc' (från FIFO eller tangentbord) avbryter.
+
+    Arduino-lyssnaren körs i en egen tråd och påverkas inte av kö-lyssnaren.
+    Tidstämpeln sätts direkt när Arduino-signalen tas emot – ingen kö emellan.
     """
     starttid = [None]
     avbruten = [False]
@@ -29,40 +28,40 @@ def vänta_på_startsignal(arduino_port):
         except serial.SerialException:
             print("⚠️ Kunde inte öppna Arduino-porten.")
 
-    def lyssna_tangentbord():
-        if platform.system() == "Windows":
-            print("🟡 Tryck [Enter] för manuell start eller [ESC] för att avbryta...")
-            while starttid[0] is None and not avbruten[0]:
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
-                    if key in [b'\r', b'\n']:
-                        starttid[0] = time.time()
-                        print("✅ Startsignal manuellt via tangentbord.")
-                        break
-                    elif key == b'\x1b':  # ESC
-                        avbruten[0] = True
-                        print("↩️ Avbrutet – återgår till huvudmenyn.")
-                        break
-        else:
-            print("🟡 Tryck [Enter] för manuell start eller [ESC] + [Enter] för att avbryta...")
-            while starttid[0] is None and not avbruten[0]:
-                i, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if i:
-                    rad = sys.stdin.readline().strip().lower()
-                    if rad == "":
-                        starttid[0] = time.time()
-                        print("✅ Startsignal manuellt via tangentbord.")
-                        break
-                    elif rad == "esc":
-                        avbruten[0] = True
-                        print("↩️ Avbrutet – återgår till huvudmenyn.")
-                        break
+    def lyssna_kö():
+        """Läser kommandon från kön (FIFO eller tangentbord)."""
+        while starttid[0] is None and not avbruten[0]:
+            kommando = läs_tangent_från_kö()
+            if kommando is None:
+                time.sleep(0.02)  # 20 ms paus mellan kontroller
+                continue
+
+            kommando_lower = kommando.strip().lower()
+
+            # Tom sträng = Enter
+            if kommando_lower == "":
+                starttid[0] = time.time()
+                print("✅ Startsignal manuellt (Enter).")
+                break
+            elif kommando_lower == "esc":
+                avbruten[0] = True
+                print("↩️ Avbrutet – återgår till huvudmenyn.")
+                break
+            else:
+                # Okänt kommando – ignorera men skriv ut för felsökning
+                print(f"ℹ️ Ignorerar kommando under väntan på start: '{kommando}'")
+
+    # Skriv status så GUI:t vet att vi väntar
+    skriv_status(
+        "vantar_start",
+        meddelande="Väntar på startsignal (Arduino eller Enter)",
+    )
 
     # Starta båda lyssnarna parallellt
     tråd_arduino = threading.Thread(target=lyssna_arduino, daemon=True)
-    tråd_tangent = threading.Thread(target=lyssna_tangentbord, daemon=True)
+    tråd_kö = threading.Thread(target=lyssna_kö, daemon=True)
     tråd_arduino.start()
-    tråd_tangent.start()
+    tråd_kö.start()
 
     # Vänta tills något händer
     while starttid[0] is None and not avbruten[0]:

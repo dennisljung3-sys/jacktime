@@ -5,6 +5,7 @@ import tkinter as tk
 from textutils import ersätt_svenska_tecken
 from fönsterhanterare import get_fönster
 from confighantering import spara_config
+from fifo_input import läs_tangent_från_kö, skriv_status   # ⭐ NYTT
 
 
 def hämta_skärmstorlek():
@@ -33,6 +34,7 @@ def rita_overlay(frame, mållinje_x=None, tid_str=None):
 def förbered_kamera_och_mållinje(config):
     """
     Förbereder kameran och visar förhandsvisning med sparad mållinje.
+    Väntar på Enter – antingen från videofönstret, terminalen eller FIFO:n.
     """
     # Hämta fönsterhanteraren
     fönster = get_fönster()
@@ -97,6 +99,13 @@ def förbered_kamera_och_mållinje(config):
     # Byt läge till tidtagning
     fönster.byt_läge("tidtagning", mållinje_x=mållinje_x)
 
+    # ⭐ NYTT: Skriv status till GUI:t
+    skriv_status(
+        "tidtagning_vantar_enter",
+        mållinje_x=mållinje_x,
+        meddelande="Tryck Redo för start när du vill börja tidtagningen",
+    )
+
     # Visa förhandsvisning tills användaren är redo
     while True:
         ret, frame = cap.read()
@@ -114,8 +123,6 @@ def förbered_kamera_och_mållinje(config):
         visning = frame.copy()
 
         # Rita mållinje i GRÖNT (visar att den är sparad)
-        # Använd mållinje_x från config (sparad i original koordinater)
-        # Efter rotation är x-koordinaten densamma, men höjden har ändrats
         cv2.line(visning, (mållinje_x, 0), (mållinje_x, höjd), (0, 255, 0), 3)
 
         cv2.putText(
@@ -129,7 +136,7 @@ def förbered_kamera_och_mållinje(config):
         )
         cv2.putText(
             visning,
-            "Tryck ENTER för att börja tidtagning, Q för att avbryta",
+            "Tryck ENTER (har eller i terminalen) for att borja tidtagning",
             (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -138,12 +145,33 @@ def förbered_kamera_och_mållinje(config):
         )
 
         cv2.imshow(fönster.fönster_namn, visning)
+
+        # ⭐ Läs tangent från videofönstret
         tangent = cv2.waitKey(1) & 0xFF
 
-        if tangent == ord("\r") or tangent == ord("\n"):  # Enter
+        # ⭐ NYTT: Läs även från kön (FIFO eller terminal)
+        kö_kommando = läs_tangent_från_kö()
+
+        # ⭐ Kolla om Enter kom från videofönstret
+        if tangent == ord("\r") or tangent == ord("\n"):
             break
-        elif tangent == ord("q"):
+
+        # ⭐ Kolla om Enter kom från kön
+        if kö_kommando is not None and kö_kommando.strip() == "":
+            print("✅ Enter från kö – startar tidtagning.")
+            break
+
+        # ⭐ Kolla om q kom från videofönstret
+        if tangent == ord("q"):
             print("❌ Avbröt.")
+            fönster.koppla_från_kamera()
+            fönster.byt_läge("tom")
+            fönster.visa_startsida()
+            return None, {}
+
+        # ⭐ Kolla om q kom från kön
+        if kö_kommando is not None and kö_kommando.strip().lower() == "q":
+            print("❌ Avbröt via kö.")
             fönster.koppla_från_kamera()
             fönster.byt_läge("tom")
             fönster.visa_startsida()

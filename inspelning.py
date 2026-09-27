@@ -4,6 +4,7 @@ import time
 import os
 from textutils import ersätt_svenska_tecken
 from fönsterhanterare import get_fönster
+from fifo_input import läs_tangent_från_kö, skriv_status   # ⭐ NYTT
 
 
 def rita_overlay(frame, mållinje_x=None, tid_str=None):
@@ -41,7 +42,19 @@ def kör_inspelningsloop(
     fps = config["kamera_fps"]
     justerad_latens_ms = config.get("justerad_latens_ms", 0)
 
+    # ⭐ NYTT: Räknare för status-uppdatering
+    frame_räknare = 0
+    senaste_status_tid = time.time()
+    STATUS_INTERVAL_S = 0.2       # 200 ms
+    STATUS_INTERVAL_FRAMES = 30   # var 30:e frame
+
     print("🎬 Tryck [mellanslag] för att starta/pausa inspelning, [q] för att avsluta.")
+
+    # Skriv status direkt vid start
+    skriv_status(
+        "inspelning_redo",
+        meddelande="Tryck Starta inspelning (mellanslag) för att börja",
+    )
 
     # Kontrollera att kameran fungerar
     test_ret, test_frame = cap.read()
@@ -117,22 +130,66 @@ def kör_inspelningsloop(
         # Visa bilden i fönsterhanteraren
         cv2.imshow(fönster.fönster_namn, frame_overlay)
 
-        # Hantera tangentbord
+        # ⭐ Läs tangent från videofönstret
         tangent = cv2.waitKey(1) & 0xFF
 
-        if tangent == ord(" "):
+        # ⭐ NYTT: Läs även från kön (FIFO eller terminal)
+        kö_kommando = läs_tangent_från_kö()
+
+        # ⭐ Hantera mellanslag (start/paus) – från video ELLER kö
+        mellanslag_tryckt = (tangent == ord(" ")) or (
+            kö_kommando is not None and kö_kommando.strip() == ""
+        ) or (kö_kommando is not None and kö_kommando.strip() == " ")
+
+        if mellanslag_tryckt:
             inspelning_aktiv = not inspelning_aktiv
             print("▶️ Startar inspelning" if inspelning_aktiv else "⏸️ Pausar inspelning")
             if not inspelning_aktiv and inspelningar:
                 inspelningar[-1]["writer"].release()
                 inspelningar[-1]["aktiv"] = False
-        elif tangent == ord("q"):
+
+        # ⭐ Hantera q (avsluta) – från video ELLER kö
+        q_tryckt = (tangent == ord("q")) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "q"
+        )
+        if q_tryckt:
             print("🛑 Avslutar inspelning.")
             break
+
+        # ⭐ NYTT: Uppdatera status var 30:e frame eller var 200 ms
+        frame_räknare += 1
+        nu = time.time()
+        if (
+            frame_räknare % STATUS_INTERVAL_FRAMES == 0
+            or (nu - senaste_status_tid) >= STATUS_INTERVAL_S
+        ):
+            if inspelning_aktiv:
+                skriv_status(
+                    "inspelning_pagar",
+                    tid=round(justerad_tid, 2),
+                    aktiv=True,
+                    antal_inspelningar=len(inspelningar),
+                    meddelande=f"Spelar in... {justerad_tid:.1f} s",
+                )
+            else:
+                skriv_status(
+                    "inspelning_pausad",
+                    tid=round(justerad_tid, 2),
+                    aktiv=False,
+                    meddelande="Inspelning pausad",
+                )
+            senaste_status_tid = nu
 
     # Stoppa eventuell pågående inspelning
     for insp in inspelningar:
         if insp["aktiv"]:
             insp["writer"].release()
+
+    # ⭐ NYTT: Slutlig status
+    skriv_status(
+        "inspelning_avslutad",
+        antal_inspelningar=len(inspelningar),
+        meddelande=f"Inspelning klar – {len(inspelningar)} fil(er) sparade",
+    )
 
     return inspelningar

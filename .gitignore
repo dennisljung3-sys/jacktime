@@ -15,6 +15,7 @@ __pycache__/
 # Ignorera resultatfiler och analyser som genereras
 resultat/
 träning/
+startlistor/
 *.avi
 *.json
 dist/

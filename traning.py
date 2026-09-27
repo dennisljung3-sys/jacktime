@@ -9,6 +9,7 @@ from metadata import spara_metadata_och_frame_tider
 from analys_main import starta_analysläge
 from textutils import sanera_filnamn
 from fönsterhanterare import get_fönster
+from fifo_input import input_från_fifo, skriv_status   # ⭐ NYTT
 
 
 def skapa_traningsmapp():
@@ -31,20 +32,37 @@ def starta_traningsläge(config):
     config = ladda_config()
 
     print("\n🏋️‍♂️ Startar träningsläge...")
+    skriv_status("traning_startar", meddelande="Startar träningsläge")
+
     spara_mapp = skapa_traningsmapp()
     if not spara_mapp:
+        skriv_status("fel", meddelande="Kunde inte skapa träningsmapp")
         return
 
     # OBS: förbered_kamera_och_mållinje returnerar cap från fönsterhanteraren
     cap, metadata = förbered_kamera_och_mållinje(config)
     if cap is None:
         print("❌ Kunde inte förbereda kameran.")
+        skriv_status("huvudmeny")
         return
 
     config["mållinje_x"] = metadata.get("mållinje_x")
     config["skärmstorlek"] = metadata.get("skärmstorlek")
 
-    input("\n⏳ Tryck [enter] när du är redo att ta emot startsignal...")
+    # ⭐ NYTT: Status innan vi väntar på Enter
+    skriv_status(
+        "traning_vantar_enter",
+        meddelande="Tryck Redo för start när du vill ta emot startsignal",
+    )
+
+    input_från_fifo("\n⏳ Tryck [enter] när du är redo att ta emot startsignal...")
+
+    # ⭐ NYTT: Status innan vi väntar på startsignal
+    skriv_status(
+        "traning_vantar_start",
+        meddelande="Väntar på startsignal (Arduino eller Enter)",
+    )
+
     start_tid = vänta_på_startsignal(config["arduino_port"])
     if start_tid is None:
         print("↩️ Tidtagning avbruten – återgår till huvudmenyn.")
@@ -52,10 +70,18 @@ def starta_traningsläge(config):
         fönster = get_fönster()
         if fönster and fönster.kamera_aktiv:
             fönster.koppla_från_kamera()
+        skriv_status("huvudmeny")
         return
 
     tidtagning_str = datetime.datetime.fromtimestamp(start_tid).strftime("%H-%M-%S")
     filnamnsbas = sanera_filnamn(tidtagning_str)
+
+    # ⭐ NYTT: Status innan inspelning börjar
+    skriv_status(
+        "traning_spelar_in",
+        start_tid=start_tid,
+        meddelande="Inspelning påbörjad",
+    )
 
     # Använd samma cap som redan är öppen från förbered_kamera_och_mållinje
     inspelningar = kör_inspelningsloop(
@@ -71,8 +97,15 @@ def starta_traningsläge(config):
         fönster.koppla_från_kamera()
         print("📷 Kamera frigjord efter inspelning.")
 
+    # ⭐ NYTT: Status innan analys-frågan
+    skriv_status(
+        "traning_inspelning_klar",
+        antal_inspelningar=len(inspelningar),
+        meddelande="Vill du analysera träningsloppet?",
+    )
+
     svar = (
-        input("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ")
+        input_från_fifo("\n🔍 Vill du analysera det här träningsloppet direkt? (j/n): ")
         .strip()
         .lower()
     )
@@ -80,8 +113,16 @@ def starta_traningsläge(config):
         senaste_video = inspelningar[-1]["fil"]
         starta_analysläge(senaste_video, valt_loppnamn=None, tillåt_nästa_lopp=False)
 
+    # ⭐ NYTT: Status innan "ett lopp till"-frågan
+    skriv_status(
+        "traning_fraga_ett_till",
+        meddelande="Vill du ta tid på ett träningslopp till?",
+    )
+
     svar2 = (
-        input("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ").strip().lower()
+        input_från_fifo("\n➕ Vill du ta tid på ett träningslopp till? (j/n): ")
+        .strip()
+        .lower()
     )
     if svar2 == "j":
         # ⭐ Ladda om config för att få eventuella uppdateringar
@@ -89,3 +130,4 @@ def starta_traningsläge(config):
         starta_traningsläge(config)
     else:
         print("🏁 Träningspass avslutat.")
+        skriv_status("huvudmeny")

@@ -1,9 +1,11 @@
+# redigera_startlista.py
 from paths import relativ_sökväg
 import os
 import json
-from startlista import mata_in_lopp
+from startlista import mata_in_lopp, normalisera_loppnamn
 from gemensamt import ladda_startlista
 from textutils import sanera_filnamn, normalisera
+
 
 def lista_startlistor():
     basmapp = relativ_sökväg("startlistor")
@@ -23,6 +25,7 @@ def lista_startlistor():
             pass
         print("❌ Ogiltigt val. Försök igen.")
 
+
 def visa_lopp(startlista):
     print("\n📋 Lopp i startlistan:")
     for i, lopp in enumerate(startlista, start=1):
@@ -32,6 +35,7 @@ def visa_lopp(startlista):
             namn = lopp["hundar"].get(str(snr), "")
             print(f"     {snr}: {namn or '[tom]'}")
 
+
 def redigera_lopp(startlista):
     visa_lopp(startlista)
     try:
@@ -39,9 +43,12 @@ def redigera_lopp(startlista):
         if 1 <= val <= len(startlista):
             nytt_lopp = mata_in_lopp()
             startlista[val - 1] = nytt_lopp
+            # ⭐ NYTT: Normalisera efter ändring
+            normalisera_loppnamn(startlista)
             print("✅ Lopp uppdaterat.")
     except:
         print("❌ Ogiltigt val.")
+
 
 def ta_bort_lopp(startlista):
     visa_lopp(startlista)
@@ -51,9 +58,12 @@ def ta_bort_lopp(startlista):
             bekräfta = input(f"⚠️ Ta bort '{startlista[val - 1]['lopp_namn']}'? (j/n): ").lower()
             if bekräfta == "j":
                 startlista.pop(val - 1)
+                # ⭐ NYTT: Normalisera efter borttagning
+                normalisera_loppnamn(startlista)
                 print("✅ Lopp borttaget.")
     except:
         print("❌ Ogiltigt val.")
+
 
 def lägg_till_lopp(startlista):
     nytt_lopp = mata_in_lopp()
@@ -74,6 +84,10 @@ def lägg_till_lopp(startlista):
         except:
             print("❌ Ogiltigt val.")
 
+    # ⭐ NYTT: Normalisera efter tillägg
+    normalisera_loppnamn(startlista)
+
+
 def exportera_startlista(startlista, filväg):
     filnamn = os.path.basename(filväg).replace(".json", "")
     export_fil = relativ_sökväg("startlistor", f"{sanera_filnamn(filnamn)}_export.txt")
@@ -93,6 +107,7 @@ def exportera_startlista(startlista, filväg):
             f.write("\n")
     print(f"\n📝 Export klar: {export_fil}")
 
+
 def redigera_startlista():
     filväg = lista_startlistor()
     if not filväg:
@@ -100,6 +115,9 @@ def redigera_startlista():
 
     with open(filväg, "r", encoding="utf-8") as f:
         startlista = json.load(f)
+
+    # ⭐ NYTT: Normalisera direkt när filen laddas (fixar gamla startlistor)
+    normalisera_loppnamn(startlista)
 
     while True:
         print("\n🛠️ Vad vill du göra?")
@@ -123,9 +141,16 @@ def redigera_startlista():
         elif val == "5":
             exportera_startlista(startlista, filväg)
         elif val == "6":
+            # ⭐ NYTT: Säkerställ normalisering innan sparande
+            normalisera_loppnamn(startlista)
             with open(filväg, "w", encoding="utf-8") as f:
                 json.dump(startlista, f, indent=2, ensure_ascii=False)
             print(f"💾 Ändringar sparade till {filväg}")
+
+            # Visa hur loppen sparades
+            print("\n📋 Sparade loppnamn:")
+            for lopp in startlista:
+                print(f"  - {lopp['lopp_namn']}")
             break
         elif val == "7":
             print("❌ Inga ändringar sparades.")

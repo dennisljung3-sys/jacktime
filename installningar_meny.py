@@ -6,6 +6,7 @@ import time
 import cv2
 import serial.tools.list_ports
 from paths import relativ_sökväg
+from fifo_input import input_från_fifo, skriv_status   # ⭐ NYTT
 
 CONFIGFIL = relativ_sökväg("data/config.json")
 LATENSFIL = relativ_sökväg("data/latens_config.json")
@@ -36,7 +37,26 @@ def installningsmeny():
         print("4. Kalibrera kamera")
         print("5. Visa aktuell konfiguration")
         print("6. Tillbaka till huvudmenyn")
-        val = input("👉 Välj (1–6): ").strip()
+
+        # ⭐ NYTT: Skriv status till GUI:t
+        skriv_status(
+            "installningar_meny",
+            kamera_index=config.get("kamera_index"),
+            kamera_fps=config.get("kamera_fps"),
+            arduino_port=config.get("arduino_port"),
+            mållinje_x=config.get("mållinje_x"),
+            menyval=[
+                {"nr": 1, "text": "Ändra kamera och FPS"},
+                {"nr": 2, "text": "Ändra Arduino-port"},
+                {"nr": 3, "text": "Sätt mållinje"},
+                {"nr": 4, "text": "Kalibrera kamera"},
+                {"nr": 5, "text": "Visa konfiguration"},
+                {"nr": 6, "text": "Tillbaka till huvudmenyn"},
+            ],
+            meddelande="Inställningar",
+        )
+
+        val = input_från_fifo("👉 Välj (1–6): ").strip()
 
         if val == "1":
             andra_kamera(config)
@@ -56,20 +76,31 @@ def installningsmeny():
 
 def andra_kamera(config):
     print("\n🎥 Väljer ny kamera och FPS...")
+    skriv_status("installningar_kamera_soker", meddelande="Söker efter kameror...")
+
     tillgängliga = []
 
     # Först, lista alla kameror
     for i in range(10):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            tillgängliga.append({"index": i, "w": w, "h": h, "fps": fps})
-            cap.release()
+        try:
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                # ⭐ NYTT: Testa om vi faktiskt kan läsa en frame
+                ret, _ = cap.read()
+                if ret:
+                    tillgängliga.append({"index": i, "w": w, "h": h, "fps": fps})
+                else:
+                    print(f"⚠️ Kamera {i} öppnades men kunde inte läsa frame – hoppar över")
+                cap.release()
+        except Exception as e:
+            print(f"⚠️ Fel vid test av kamera {i}: {e}")
 
     if not tillgängliga:
         print("❌ Inga kameror hittades.")
+        skriv_status("installningar_meny", meddelande="Inga kameror hittades")
         return
 
     print("\n📋 Tillgängliga kameror:")
@@ -78,9 +109,23 @@ def andra_kamera(config):
             f"{i}. Index {cam['index']} – {cam['w']}x{cam['h']} @ {int(cam['fps'])} FPS"
         )
 
+    # ⭐ NYTT: Skriv status till GUI:t med kamerorna
+    skriv_status(
+        "installningar_valj_kamera",
+        kameror=[
+            {
+                "nr": i,
+                "index": c["index"],
+                "text": f"Index {c['index']} – {c['w']}x{c['h']} @ {int(c['fps'])} FPS",
+            }
+            for i, c in enumerate(tillgängliga, 1)
+        ],
+        meddelande="Välj kamera",
+    )
+
     # Välj kamera
     while True:
-        val = input("👉 Välj kamera (nummer): ").strip()
+        val = input_från_fifo("👉 Välj kamera (nummer): ").strip()
         if val.isdigit() and 1 <= int(val) <= len(tillgängliga):
             valt_index = tillgängliga[int(val) - 1]["index"]
             break
@@ -93,17 +138,17 @@ def andra_kamera(config):
 
     if fönster is None:
         print("❌ Fönsterhanteraren är inte tillgänglig!")
+        skriv_status("installningar_meny", meddelande="Fönsterhanteraren saknas")
         return
 
     # Anslut kameran via fönsterhanteraren
     if not fönster.koppla_kamera(valt_index):
         print("❌ Kunde inte öppna kameran.")
+        skriv_status("installningar_meny", meddelande="Kunde inte öppna kameran")
         return
 
     # Hämta kamerainställningar
     cap = fönster.cap
-    original_höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    original_bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     verifierad_fps = cap.get(cv2.CAP_PROP_FPS)
 
     print(f"\n📺 Visar live-feed från kamera {valt_index} i JackTime-fönstret.")
@@ -114,6 +159,13 @@ def andra_kamera(config):
 
     # Byt läge till förhandsvisning
     fönster.byt_läge("förhandsvisning")
+
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "installningar_kamera_forhandsvisning",
+        kamera_index=valt_index,
+        meddelande=f"Kamera {valt_index} – tryck Q för att bekräfta, ESC för att avbryta",
+    )
 
     bekräftad = False
 
@@ -153,13 +205,30 @@ def andra_kamera(config):
         # Visa i fönsterhanteraren
         cv2.imshow(fönster.fönster_namn, visning)
 
-        # Hantera tangentbord
+        # ⭐ Läs tangent från videofönstret
         tangent = cv2.waitKey(1) & 0xFF
 
-        if tangent == ord("q"):
+        # ⭐ NYTT: Läs även från kön
+        kö_kommando = None
+        try:
+            from fifo_input import läs_tangent_från_kö
+            kö_kommando = läs_tangent_från_kö()
+        except Exception:
+            pass
+
+        # ⭐ Hantera q (bekräfta) – från video ELLER kö
+        q_tryckt = (tangent == ord("q")) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "q"
+        )
+        if q_tryckt:
             bekräftad = True
             break
-        elif tangent == 27:  # ESC
+
+        # ⭐ Hantera ESC (avbryt) – från video ELLER kö
+        esc_tryckt = (tangent == 27) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "esc"
+        )
+        if esc_tryckt:
             print("❌ Avbröt kameraval.")
             break
 
@@ -174,14 +243,29 @@ def andra_kamera(config):
         fönster.visa_startsida()
 
     if not bekräftad:
+        skriv_status("installningar_meny", meddelande="Kameraval avbrutet")
         return
 
     # Fråga om FPS
     print("\n🎞️ Välj önskad FPS:")
     print("1. 30 fps\n2. 60 fps\n3. 100 fps\n4. 120 fps")
     fps_dict = {"1": 30, "2": 60, "3": 100, "4": 120}
+
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "installningar_valj_fps",
+        kamera_index=valt_index,
+        fps_alternativ=[
+            {"nr": 1, "fps": 30},
+            {"nr": 2, "fps": 60},
+            {"nr": 3, "fps": 100},
+            {"nr": 4, "fps": 120},
+        ],
+        meddelande="Välj FPS",
+    )
+
     while True:
-        val = input("👉 Välj (1–4): ").strip()
+        val = input_från_fifo("👉 Välj (1–4): ").strip()
         if val in fps_dict:
             fps_val = fps_dict[val]
             break
@@ -206,15 +290,29 @@ def andra_kamera(config):
 
 def andra_arduino(config):
     print("\n🔌 Söker efter Arduino-enheter...")
+    skriv_status("installningar_arduino_soker", meddelande="Söker efter Arduino...")
+
     portar = list(serial.tools.list_ports.comports())
     if not portar:
         print("❌ Inga enheter hittades.")
+        skriv_status("installningar_meny", meddelande="Inga Arduino-enheter hittades")
         return
 
     for i, port in enumerate(portar, start=1):
         print(f"{i}. {port.device} – {port.description}")
+
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "installningar_valj_arduino",
+        portar=[
+            {"nr": i, "device": p.device, "beskrivning": p.description}
+            for i, p in enumerate(portar, 1)
+        ],
+        meddelande="Välj Arduino-port",
+    )
+
     while True:
-        val = input("👉 Välj port (nummer): ").strip()
+        val = input_från_fifo("👉 Välj port (nummer): ").strip()
         if val.isdigit() and 1 <= int(val) <= len(portar):
             vald_port = portar[int(val) - 1].device
             break
@@ -228,49 +326,44 @@ def andra_arduino(config):
 def sätt_mållinje(config):
     """Sätter mållinjen och sparar i config"""
     print("\n📍 Sätter mållinje...")
+    skriv_status("installningar_mallinje", meddelande="Sätter mållinje")
 
-    # Hämta fönsterhanteraren
     from fönsterhanterare import get_fönster
 
     fönster = get_fönster()
-
     if fönster is None:
         print("❌ Fönsterhanteraren är inte tillgänglig!")
         return
 
-    # Kontrollera att kamera är vald
     kamera_index = config.get("kamera_index")
     if kamera_index is None:
         print("❌ Välj kamera först! (Inställningar → Andra kamera)")
+        skriv_status("installningar_meny", meddelande="Välj kamera först")
         return
 
-    # Koppla kameran
     if not fönster.koppla_kamera(kamera_index):
         print("❌ Kunde inte öppna kameran.")
         return
 
-    # Hämta kamerainställningar
     cap = fönster.cap
-    original_höjd = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    original_bredd = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-
-    # Efter rotation kommer höjd och bredd att byta plats
-    print(f"📷 Kamera ansluten: {original_bredd}x{original_höjd}")
-
-    # Hämta sparad mållinje (om den finns)
     mållinje_x = config.get("mållinje_x")
+
     if mållinje_x is not None:
         print(f"📌 Sparad mållinje: x = {mållinje_x}")
-        print("   Tryck ENTER för att använda sparad, eller A/D/klicka för att justera")
     else:
         print("📍 Ingen sparad mållinje - ställ in nu")
 
-    # Variabler
     mållinje_ändrad = False
     bekräftad = False
 
-    # Byt läge till förhandsvisning
     fönster.byt_läge("förhandsvisning")
+
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "installningar_mallinje_justera",
+        mållinje_x=mållinje_x,
+        meddelande="A/D för att flytta, Enter för att spara, Q för att avbryta",
+    )
 
     while True:
         ret, frame = cap.read()
@@ -278,21 +371,16 @@ def sätt_mållinje(config):
             print("❌ Kunde inte läsa från kameran.")
             break
 
-        # ⭐ ROTERA BILDEN 90° MOTURS
         frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        # ⭐ HÄMTA NYA DIMENSIONER EFTER ROTATION
         höjd, bredd = frame.shape[:2]
-
         visning = frame.copy()
 
-        # Rita mållinje
         if mållinje_x is not None:
             cv2.line(visning, (mållinje_x, 0), (mållinje_x, höjd), (0, 0, 255), 3)
             if not mållinje_ändrad:
                 cv2.putText(
                     visning,
-                    "SPARAD MALLINJE (röd) - Tryck ENTER för att använda",
+                    "SPARAD MALLINJE (röd) - Tryck ENTER for att anvanda",
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -300,12 +388,11 @@ def sätt_mållinje(config):
                     2,
                 )
         else:
-            # Temporär mållinje i mitten (grå)
             mitt_x = bredd // 2
             cv2.line(visning, (mitt_x, 0), (mitt_x, höjd), (100, 100, 100), 2)
             cv2.putText(
                 visning,
-                "TEMP MALLINJE - Klicka eller A/D för att flytta",
+                "TEMP MALLINJE - Klicka eller A/D for att flytta",
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -313,10 +400,9 @@ def sätt_mållinje(config):
                 2,
             )
 
-        # Instruktioner
         cv2.putText(
             visning,
-            "A/D = flytta linje, ENTER = spara, Q = avbryt",
+            "A/D = flytta, ENTER = spara, Q = avbryt",
             (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -324,7 +410,6 @@ def sätt_mållinje(config):
             2,
         )
 
-        # Position
         if mållinje_x is not None:
             pos_text = f"Position: {mållinje_x}" + (
                 " (justerad)" if mållinje_ändrad else " (sparad)"
@@ -342,34 +427,60 @@ def sätt_mållinje(config):
         cv2.imshow(fönster.fönster_namn, visning)
         tangent = cv2.waitKey(1) & 0xFF
 
-        if tangent == ord("\r") or tangent == ord("\n"):  # Enter
+        # ⭐ NYTT: Läs även från kön
+        kö_kommando = None
+        try:
+            from fifo_input import läs_tangent_från_kö
+            kö_kommando = läs_tangent_från_kö()
+        except Exception:
+            pass
+
+        # Enter (spara) – från video ELLER kö
+        enter_tryckt = (
+            (tangent == ord("\r") or tangent == ord("\n"))
+            or (kö_kommando is not None and kö_kommando.strip() == "")
+        )
+        if enter_tryckt:
             if mållinje_x is not None:
                 bekräftad = True
                 break
             else:
                 print("⚠️ Sätt en mållinje först (klicka eller A/D)")
-        elif tangent == ord("q"):
+
+        # q (avbryt) – från video ELLER kö
+        q_tryckt = (tangent == ord("q")) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "q"
+        )
+        if q_tryckt:
             print("❌ Avbröt.")
             break
-        elif tangent == ord("a"):
+
+        # a (backa) – från video ELLER kö
+        a_tryckt = (tangent == ord("a")) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "a"
+        )
+        if a_tryckt:
             if mållinje_x is None:
                 mållinje_x = bredd // 2
             mållinje_x = max(0, mållinje_x - 10)
             mållinje_ändrad = True
             print(f"📍 Mållinje flyttad till x = {mållinje_x}")
-        elif tangent == ord("d"):
+
+        # d (fram) – från video ELLER kö
+        d_tryckt = (tangent == ord("d")) or (
+            kö_kommando is not None and kö_kommando.strip().lower() == "d"
+        )
+        if d_tryckt:
             if mållinje_x is None:
                 mållinje_x = bredd // 2
             mållinje_x = min(bredd, mållinje_x + 10)
             mållinje_ändrad = True
             print(f"📍 Mållinje flyttad till x = {mållinje_x}")
 
-    # Koppla från kameran
     fönster.koppla_från_kamera()
     fönster.byt_läge("tom")
     fönster.visa_startsida()
 
-    # Spara om bekräftad
     if bekräftad and mållinje_x is not None:
         config["mållinje_x"] = mållinje_x
         spara_config(config)
@@ -380,6 +491,7 @@ def sätt_mållinje(config):
 
 def kalibrera_kamera():
     print("\n📡 Startar kalibrering...")
+    skriv_status("installningar_kalibrering", meddelande="Startar kalibrering...")
     try:
         import kalibrera_kamera
 

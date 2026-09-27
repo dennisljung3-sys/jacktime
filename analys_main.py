@@ -1,3 +1,5 @@
+# analys_main.py - FIXAD VERSION med kamerafrigöring
+
 from paths import relativ_sökväg
 import os
 import cv2
@@ -11,6 +13,8 @@ from sammanfattning import (
     fråga_om_export
 )
 from confighantering import ladda_config
+from fönsterhanterare import get_fönster
+
 
 def hantera_analysval(index, matchande_videor):
     print("\n🎞️ Tillgängliga videor:")
@@ -78,7 +82,7 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
         elif isinstance(val, int):
             index = val
         else:
-            continue  # Ogiltigt val, upprepa
+            continue
 
         aktuell_fil = os.path.join(videomapp, matchande[index])
         print(f"\n🎞️ Öppnar video {index+1}/{len(matchande)}: {matchande[index]}")
@@ -99,24 +103,56 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
     print("\n📋 Slutlig sammanfattning:")
     visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
 
-    # Automatisk sparning om tider finns
+    # ⭐ FIX: Spara resultat korrekt baserat på typ
     if loggade_tider_total:
-        from metadata import spara_metadata_och_frame_tider as spara_resultat
         spara_analysresultat(aktuell_fil, loggade_tider_total)
 
         if valt_loppnamn is None:
-            loppnamn_sanerat = "träning"
+            # Träningsläge
+            datum = os.path.basename(os.path.dirname(aktuell_fil))
+            video_filnamn = os.path.splitext(os.path.basename(aktuell_fil))[0]
+            loppnamn_sanerat = sanera_filnamn(video_filnamn)
+            
+            mapp = relativ_sökväg("träning", datum)
+            os.makedirs(mapp, exist_ok=True)
+            filnamn = os.path.join(mapp, f"{loppnamn_sanerat}.json")
+            
+            data = {
+                "tider": loggade_tider_total,
+                "metadata": metadata,
+                "startlista": startlista_dict,
+                "lopp_namn": video_filnamn,
+                "video_fil": os.path.basename(aktuell_fil)
+            }
+            
+            with open(filnamn, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            print(f"💾 Träningsresultat sparat: {filnamn}")
+            fråga_om_export("träning", loppnamn_sanerat, loggade_tider_total, startlista_dict)
         else:
+            # Tävlingsläge
             loppnamn_sanerat = sanera_filnamn(valt_loppnamn)
-
-        spara_sammanfattning_json(startlista_namn, loppnamn_sanerat, loggade_tider_total, metadata, startlista_dict)
-        fråga_om_export(startlista_namn, loppnamn_sanerat, loggade_tider_total, startlista_dict)
+            spara_sammanfattning_json(
+                startlista_namn,
+                loppnamn_sanerat,
+                loggade_tider_total,
+                metadata,
+                startlista_dict
+            )
+            fråga_om_export(startlista_namn, loppnamn_sanerat, loggade_tider_total, startlista_dict)
 
         print("💾 Resultat sparat automatiskt.")
     else:
         print("⚠️ Inga tider loggade – resultat sparas inte.")
 
     print("🏁 Analys klar.")
+
+    # ⭐ FIX: Frigör kameran INNAN vi går vidare till nästa lopp
+    fönster = get_fönster()
+    if fönster and fönster.cap is not None:
+        fönster.koppla_från_kamera()
+        print("📷 Kamera frigjord efter analys.")
 
     # Hoppa till nästa lopp om tillåtet
     if tillåt_nästa_lopp and startlista_namn and startlista and lopp_index is not None:
@@ -127,9 +163,13 @@ def starta_analysläge(videofil, valt_loppnamn=None, tillåt_nästa_lopp=False, 
                 print(f"\n⏱️ Nästa lopp: {nästa_lopp['lopp_namn']}")
                 config = ladda_config()
                 config["senaste_lopp_id"] = lopp_index + 2
+                
+                # ⭐ Liten paus så att kameran hinner frigöras helt
+                import time
+                time.sleep(0.5)
+                
                 starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1, hoppa_fortsättningsfråga=True)
             else:
                 print("✅ Alla lopp är analyserade – tävlingspasset är klart.")
         else:
             print("⚠️ Kunde inte hoppa till nästa lopp – startlista saknas eller är inte en lista.")
-

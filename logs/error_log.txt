@@ -74,3 +74,99 @@ Traceback (most recent call last):
               ^^^^^^^^^^^
 NameError: name 'get_fönster' is not defined
 
+2026-09-11 18:13:42,061 [ERROR] 'arduino_port'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 56, in huvudmeny
+    starta_traningsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/traning.py", line 47, in starta_traningsläge
+    start_tid = vänta_på_startsignal(config["arduino_port"])
+                                     ~~~~~~^^^^^^^^^^^^^^^^
+KeyError: 'arduino_port'
+
+2026-09-12 10:46:55,762 [ERROR] 'NoneType' object has no attribute 'read'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_tavlingsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/tavling.py", line 91, in starta_tavlingsläge
+    inspelningar = kör_inspelningsloop(
+        cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"]
+    )
+  File "/home/dennis/jacktime/inspelning.py", line 47, in kör_inspelningsloop
+    test_ret, test_frame = cap.read()
+                           ^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'read'
+
+2026-09-12 10:56:31,333 [ERROR] 'NoneType' object has no attribute 'read'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_tavlingsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/tavling.py", line 105, in starta_tavlingsläge
+    starta_analysläge(
+    ~~~~~~~~~~~~~~~~~^
+        videofil=senaste_video,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        lopp_index=lopp_index,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/dennis/jacktime/analys_main.py", line 171, in starta_analysläge
+    starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1, hoppa_fortsättningsfråga=True)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/tavling.py", line 91, in starta_tavlingsläge
+    inspelningar = kör_inspelningsloop(
+        cap, config, start_tid, spara_mapp, filnamnsbas, config["mållinje_x"]
+    )
+  File "/home/dennis/jacktime/inspelning.py", line 47, in kör_inspelningsloop
+    test_ret, test_frame = cap.read()
+                           ^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'read'
+
+2026-09-13 13:50:48,567 [ERROR] 'str' object has no attribute 'extend'
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 29, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 52, in huvudmeny
+    starta_tavlingsläge(config)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/dennis/jacktime/tavling.py", line 105, in starta_tavlingsläge
+    starta_analysläge(
+    ~~~~~~~~~~~~~~~~~^
+        videofil=senaste_video,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        lopp_index=lopp_index,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/dennis/jacktime/analys_main.py", line 171, in starta_analysläge
+    starta_tavlingsläge(config, startlista_namn, startlista, lopp_index + 1, hoppa_fortsättningsfråga=True)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dennis/jacktime/tavling.py", line 105, in starta_tavlingsläge
+    starta_analysläge(
+    ~~~~~~~~~~~~~~~~~^
+        videofil=senaste_video,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        lopp_index=lopp_index,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/dennis/jacktime/analys_main.py", line 100, in starta_analysläge
+    loggade_tider_total[hund].extend(tider if isinstance(tider, list) else [tider])
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'extend'
+
