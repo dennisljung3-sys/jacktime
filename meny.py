@@ -111,7 +111,18 @@ def visa_analysmeny():
     print("\n📊 Vad vill du analysera?")
     print("1. Tävling")
     print("2. Träning")
-    val_typ = input("👉 Välj (1–2): ").strip()
+
+    # ⭐ NYTT: Skriv status till GUI:t
+    skriv_status(
+        "analys_typ",
+        menyval=[
+            {"nr": 1, "text": "Tävling"},
+            {"nr": 2, "text": "Träning"},
+        ],
+        meddelande="Vad vill du analysera?",
+    )
+
+    val_typ = input_från_fifo("👉 Välj (1–2): ").strip()
 
     if val_typ == "1":
         basmapp = relativ_sökväg("resultat")
@@ -127,18 +138,30 @@ def visa_analysmeny():
         ]
     else:
         print("❌ Ogiltigt val.")
+        skriv_status("huvudmeny")
         return
 
     if not mappar:
         print("❌ Inga mappar hittades.")
+        skriv_status("huvudmeny")
         return
 
     print("\n📁 Tillgängliga mappar:")
     for i, namn in enumerate(mappar, 1):
         print(f"{i}. {namn}")
-    val_mapp = input("👉 Välj (nummer): ").strip()
+
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "analys_valj_mapp",
+        typ="tävling" if val_typ == "1" else "träning",
+        mappar=[{"nr": i, "namn": m} for i, m in enumerate(mappar, 1)],
+        meddelande="Välj mapp",
+    )
+
+    val_mapp = input_från_fifo("👉 Välj (nummer): ").strip()
     if not val_mapp.isdigit() or not (1 <= int(val_mapp) <= len(mappar)):
         print("❌ Ogiltigt val.")
+        skriv_status("huvudmeny")
         return
     vald_mapp = mappar[int(val_mapp) - 1]
     full_path = os.path.join(basmapp, vald_mapp)
@@ -146,6 +169,7 @@ def visa_analysmeny():
     videofiler = [f for f in os.listdir(full_path) if f.endswith(".avi")]
     if not videofiler:
         print("❌ Inga videofiler hittades i mappen.")
+        skriv_status("huvudmeny")
         return
 
     loppgrupper = {}
@@ -157,6 +181,7 @@ def visa_analysmeny():
 
     if not loppgrupper:
         print("❌ Inga giltiga lopp hittades.")
+        skriv_status("huvudmeny")
         return
 
     print(f"\n🏁 Lopp i mappen '{vald_mapp}':")
@@ -170,9 +195,26 @@ def visa_analysmeny():
             lopp_namn = namn
         print(f"{i}. {lopp_namn} ({lopp_id})")
 
-    val_lopp = input("👉 Välj lopp (nummer): ").strip()
+    # ⭐ NYTT: Status till GUI:t
+    skriv_status(
+        "analys_valj_lopp",
+        typ="tävling" if val_typ == "1" else "träning",
+        mapp=vald_mapp,
+        lopp=[
+            {
+                "nr": i,
+                "namn": n.split("__")[1] if len(n.split("__")) == 2 else n,
+                "id": n,
+            }
+            for i, n in enumerate(loppnamn_lista, 1)
+        ],
+        meddelande="Välj lopp",
+    )
+
+    val_lopp = input_från_fifo("👉 Välj lopp (nummer): ").strip()
     if not val_lopp.isdigit() or not (1 <= int(val_lopp) <= len(loppnamn_lista)):
         print("❌ Ogiltigt val.")
+        skriv_status("huvudmeny")
         return
 
     valt_prefix = loppnamn_lista[int(val_lopp) - 1]
@@ -182,6 +224,7 @@ def visa_analysmeny():
 
     if not matchande_videor:
         print("❌ Inga videor hittades för valt lopp.")
+        skriv_status("huvudmeny")
         return
 
     if val_typ == "2":
@@ -193,7 +236,6 @@ def visa_analysmeny():
         starta_analysläge(
             matchande_videor[0], sanera_filnamn(loppnamn), tillåt_nästa_lopp=True
         )
-
 
 def visa_sammanfattningsmeny():
     print("\n📊 Vill du visa sammanfattning för:")

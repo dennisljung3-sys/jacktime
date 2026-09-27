@@ -170,3 +170,23 @@ Traceback (most recent call last):
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'str' object has no attribute 'extend'
 
+2026-09-27 06:28:53,399 [ERROR] cannot access local variable 'startlista_dict' where it is not associated with a value
+Traceback (most recent call last):
+  File "/home/dennis/jacktime/main.py", line 52, in main
+    huvudmeny()
+    ~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 82, in huvudmeny
+    visa_analysmeny()
+    ~~~~~~~~~~~~~~~^^
+  File "/home/dennis/jacktime/meny.py", line 236, in visa_analysmeny
+    starta_analysläge(
+    ~~~~~~~~~~~~~~~~~^
+        matchande_videor[0], sanera_filnamn(loppnamn), tillåt_nästa_lopp=True
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/dennis/jacktime/analys_main.py", line 157, in starta_analysläge
+    visa_sammanfattning(valt_loppnamn, loggade_tider_total, startlista_dict)
+                                                            ^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'startlista_dict' where it is not associated with a value
+

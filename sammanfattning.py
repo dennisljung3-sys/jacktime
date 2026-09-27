@@ -110,7 +110,19 @@ def spara_sammanfattning_json(startlista_namn, loppnamn, tider, metadata, startl
     print(f"💾 Sammanfattning sparad: {filnamn}")
 
 def fråga_om_export(startlista_namn, loppnamn, tider, startlista):
-    svar = input("📤 Vill du exportera sammanfattningen till en Excel-fil? (j/n): ").strip().lower()
+    from fifo_input import input_från_fifo, skriv_status   # ⭐ NYTT
+
+    # ⭐ NYTT: Skriv status till GUI:t
+    skriv_status(
+        "fraga_om_export",
+        lopp=loppnamn,
+        meddelande="Vill du exportera sammanfattningen till Excel?",
+    )
+
+    svar = input_från_fifo(
+        "📤 Vill du exportera sammanfattningen till en Excel-fil? (j/n): "
+    ).strip().lower()
+
     if svar == "j":
         exportera_till_excel(startlista_namn, loppnamn, tider, startlista)
 

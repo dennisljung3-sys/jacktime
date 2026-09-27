@@ -1,5 +1,4 @@
 # analys_logger.py - Komplett version med adaptiv storlek och bevarad aspect ratio
-
 import cv2
 import os
 import json
@@ -8,6 +7,7 @@ from datetime import datetime
 from paths import relativ_sökväg
 from textutils import sanera_filnamn
 from fönsterhanterare import get_fönster
+from fifo_input import läs_tangent_från_kö, skriv_status   # ⭐ NYTT
 
 
 def logga_tid(hundnummer, tid_före, tid_efter, före_pos, efter_pos, mållinje_x):
@@ -68,24 +68,21 @@ def hantera_loggning(cap, metadata, startlista):
         screen_height = root.winfo_screenheight()
         root.destroy()
     except:
-        # Fallback om tkinter inte fungerar
         screen_width = 1920
         screen_height = 1080
 
     # ⭐ BERÄKNA MAXIMAL STORLEK (halva skärmen med marginal)
-    max_bredd = screen_width // 2 - 50  # 50px marginal
-    max_höjd = screen_height - 100  # 100px marginal för taskbar etc.
+    max_bredd = screen_width // 2 - 50
+    max_höjd = screen_height - 100
 
     print(f"🖥️ Skärmupplösning: {screen_width}x{screen_height}")
     print(f"📐 Maximal fönsterstorlek: {max_bredd}x{max_höjd}")
 
     # ⭐ BERÄKNA OPTIMAL STORLEK (behåll aspect ratio)
-    # Vi vill passa in videon i max_storlek utan att förvränga
     skal_x = max_bredd / ursprunglig_bredd
     skal_y = max_höjd / ursprunglig_höjd
-    skal = min(skal_x, skal_y)  # Använd den mindre skalfaktorn - BEVARAR ASPECT RATIO!
+    skal = min(skal_x, skal_y)
 
-    # Beräkna den faktiska visningsstorleken
     fönster_bredd = int(ursprunglig_bredd * skal)
     fönster_höjd = int(ursprunglig_höjd * skal)
 
@@ -108,18 +105,15 @@ def hantera_loggning(cap, metadata, startlista):
     fönster.x_pos = screen_width // 2 + (max_bredd - fönster_bredd) // 2
     fönster.y_pos = (screen_height - fönster_höjd) // 2
 
-    # Ändra storlek och position på fönstret
     cv2.resizeWindow(fönster.fönster_namn, fönster_bredd, fönster_höjd)
     cv2.moveWindow(fönster.fönster_namn, fönster.x_pos, fönster.y_pos)
 
-    # ⭐ Ingen ytterligare skalning behövs - videon visas i fönsterstorlek
     visad_bredd = fönster_bredd
     visad_höjd = fönster_höjd
     offset_x = 0
     offset_y = 0
 
     mållinje_x = metadata.get("mållinje_x")
-    # ⭐ Skala mållinjen till fönsterstorlek
     mållinje_x_scaled = int(mållinje_x * skal) if mållinje_x else None
 
     loggade_tider = {str(nr): "DNF" for nr in startlista.keys()}
@@ -164,12 +158,10 @@ def hantera_loggning(cap, metadata, startlista):
     def mus_klick(event, x, y, flags, param):
         """Hanterar musklick för analys - anropas från fönsterhanteraren"""
         if event == cv2.EVENT_LBUTTONDOWN:
-            # Hämta aktuella värden från fönsterhanteraren
             aktiv = fönster.läges_data.get("analys_aktiv_hund")
             if aktiv is None:
                 return
 
-            # ⭐ Skala tillbaka från fönsterkoordinater till original
             skal = fönster.läges_data["analys_skal"]
             ursprunglig_x = int(x / skal)
 
@@ -183,6 +175,15 @@ def hantera_loggning(cap, metadata, startlista):
                 fönster.läges_data["analys_frame_före"] = frame_idx
                 print(
                     f"🐾 Hund {aktiv}: nos före målgång markerad (frame {frame_idx}, x={ursprunglig_x})"
+                )
+                # ⭐ NYTT: Status till GUI:t
+                skriv_status(
+                    "analys_markerar",
+                    hund=aktiv,
+                    steg="före",
+                    frame=frame_idx,
+                    x=ursprunglig_x,
+                    meddelande=f"Hund {aktiv}: Klicka nos EFTER mållinjen",
                 )
             elif klick_efter_val is None:
                 # Andra klicket - efter målgång
@@ -230,6 +231,14 @@ def hantera_loggning(cap, metadata, startlista):
                     visa_loggningsstatus(
                         loggade, fönster.läges_data["analys_startlista"]
                     )
+                    # ⭐ NYTT: Status till GUI:t
+                    skriv_status(
+                        "analys_tid_loggad",
+                        hund=aktiv,
+                        tid=tid,
+                        loggade_tider=loggade,
+                        meddelande=f"Hund {aktiv}: {tid:.3f} s – välj nästa hund",
+                    )
 
                 # Återställ för nästa hund
                 fönster.läges_data["analys_aktiv_hund"] = None
@@ -243,12 +252,10 @@ def hantera_loggning(cap, metadata, startlista):
         if tangent == ord("q"):
             fönster.läges_data["analys_avsluta"] = True
         elif tangent == ord("a"):
-            # Backa en frame
             ny_frame = max(0, fönster.läges_data.get("analys_frame_index", 0) - 1)
             fönster.läges_data["analys_frame_index"] = ny_frame
             cap.set(cv2.CAP_PROP_POS_FRAMES, ny_frame)
         elif tangent == ord("d"):
-            # Fram en frame
             ny_frame = min(
                 fönster.läges_data.get("analys_total_frames", 0) - 1,
                 fönster.läges_data.get("analys_frame_index", 0) + 1,
@@ -256,7 +263,6 @@ def hantera_loggning(cap, metadata, startlista):
             fönster.läges_data["analys_frame_index"] = ny_frame
             cap.set(cv2.CAP_PROP_POS_FRAMES, ny_frame)
         elif tangent in [ord("1"), ord("2"), ord("3"), ord("4"), ord("5"), ord("6")]:
-            # Välj hund
             hund = int(chr(tangent))
             fönster.läges_data["analys_aktiv_hund"] = hund
             fönster.läges_data["analys_klick_före"] = None
@@ -274,21 +280,37 @@ def hantera_loggning(cap, metadata, startlista):
     # Sätt mus-callback
     cv2.setMouseCallback(fönster.fönster_namn, mus_klick)
 
+    # ⭐ NYTT: Skriv status till GUI:t när analysen börjar
+    skriv_status(
+        "analys_redo",
+        hundar={
+            nr: info.get("namn", f"Hund {nr}")
+            for nr, info in startlista.items()
+        },
+        loggade_tider=loggade_tider,
+        total_frames=total_frames,
+        frame=0,
+        meddelande="Välj hund (1-6) för att börja logga, eller A/D för att navigera",
+    )
+
+    # ⭐ Räknare för status-uppdatering
+    frame_räknare = 0
+    senaste_status_tid = datetime.now().timestamp()
+    STATUS_INTERVAL_S = 0.2
+    STATUS_INTERVAL_FRAMES = 30
+
     # Huvudloop för analys
     while not fönster.läges_data.get("analys_avsluta", False):
-        # Hämta frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, fönster.läges_data["analys_frame_index"])
         ret, frame = cap.read()
         if not ret:
             print("❌ Kunde inte läsa frame.")
             break
 
-        # ⭐ Videon är redan roterad - skala till fönsterstorlek (bevarar aspect ratio)
         frame = cv2.resize(
             frame, (fönster_bredd, fönster_höjd), interpolation=cv2.INTER_AREA
         )
 
-        # Beräkna tid
         frame_idx = fönster.läges_data["analys_frame_index"]
         tid = (
             frame_tider[frame_idx]
@@ -296,10 +318,8 @@ def hantera_loggning(cap, metadata, startlista):
             else (frame_idx / fps) + fördröjning
         )
 
-        # Rita overlay
         overlay = frame.copy()
 
-        # ⭐ Rita mållinje (röd) - använd den skalade positionen
         if mållinje_x_scaled is not None and 0 <= mållinje_x_scaled < fönster_bredd:
             cv2.line(
                 overlay,
@@ -309,7 +329,6 @@ def hantera_loggning(cap, metadata, startlista):
                 2,
             )
 
-        # Visa tid (om den finns)
         if tid:
             cv2.putText(
                 overlay,
@@ -321,7 +340,6 @@ def hantera_loggning(cap, metadata, startlista):
                 2,
             )
 
-        # Visa frame-information
         cv2.putText(
             overlay,
             f"Frame: {frame_idx}/{total_frames}",
@@ -332,7 +350,6 @@ def hantera_loggning(cap, metadata, startlista):
             2,
         )
 
-        # Visa aktiv hund om vald
         aktiv = fönster.läges_data.get("analys_aktiv_hund")
         if aktiv is not None:
             cv2.putText(
@@ -345,7 +362,6 @@ def hantera_loggning(cap, metadata, startlista):
                 2,
             )
 
-        # Visa instruktioner längst ner
         cv2.putText(
             overlay,
             "A/D = BACKA/FRAM, 1-6 = VAL AV HUND, Q = AVSLUTA",
@@ -356,15 +372,53 @@ def hantera_loggning(cap, metadata, startlista):
             2,
         )
 
-        # Visa i fönsterhanteraren
         cv2.imshow(fönster.fönster_namn, overlay)
 
-        # Hantera tangentbord
+        # ⭐ Läs tangent från videofönstret
         tangent = cv2.waitKey(1) & 0xFF
 
-        # Anropa tangent_callback om tangent tryckts
+        # ⭐ NYTT: Läs även från kön
+        kö_kommando = läs_tangent_från_kö()
+
+        # ⭐ Hantera tangent från video
         if tangent != 255:
             tangent_callback(tangent)
+
+        # ⭐ NYTT: Hantera kommando från kön
+        if kö_kommando is not None:
+            kommando_lower = kö_kommando.strip().lower()
+            # Mappa kö-kommandon till "tangent"-koder
+            if kommando_lower == "q":
+                tangent_callback(ord("q"))
+            elif kommando_lower == "a":
+                tangent_callback(ord("a"))
+            elif kommando_lower == "d":
+                tangent_callback(ord("d"))
+            elif kommando_lower in ["1", "2", "3", "4", "5", "6"]:
+                tangent_callback(ord(kommando_lower))
+            elif kommando_lower == "":
+                # Enter – ignorera i analysläget (används inte)
+                pass
+            else:
+                print(f"ℹ️ Ignorerar kommando i analys: '{kö_kommando}'")
+
+        # ⭐ NYTT: Uppdatera status var 30:e frame eller var 200 ms
+        frame_räknare += 1
+        nu = datetime.now().timestamp()
+        if (
+            frame_räknare % STATUS_INTERVAL_FRAMES == 0
+            or (nu - senaste_status_tid) >= STATUS_INTERVAL_S
+        ):
+            skriv_status(
+                "analys_pagar",
+                frame=frame_idx,
+                total_frames=total_frames,
+                tid=round(tid, 3) if tid else None,
+                aktiv_hund=fönster.läges_data.get("analys_aktiv_hund"),
+                loggade_tider=fönster.läges_data.get("analys_loggade_tider", {}),
+                meddelande=f"Frame {frame_idx}/{total_frames}",
+            )
+            senaste_status_tid = nu
 
     # ⭐ Återställ fönsterstorleken till ursprunglig
     cv2.resizeWindow(fönster.fönster_namn, gammal_bredd, gammal_höjd)
